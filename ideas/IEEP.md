@@ -461,6 +461,101 @@ While enabled:
 
 Persistent observation must never become hidden surveillance.
 
+### Open Requirement: Native Input and Computer-Control Backend
+
+The exact implementation used to move the pointer, click, drag, scroll, type, press shortcuts, inject controller input, or otherwise control the host remains an **open requirement**.
+
+Butler should expose a stable high-level computer-control capability to the primary agent while allowing the low-level platform backend to vary.
+
+Conceptually:
+
+```text
+Primary Agent
+      ↓
+Butler Computer-Control Capability
+      ↓
+High-level actions
+      │
+      ├── pointer.move
+      ├── pointer.click
+      ├── pointer.drag
+      ├── scroll
+      ├── keyboard.type
+      ├── keyboard.press
+      ├── keyboard.hotkey
+      └── optional controller/touch actions
+      ↓
+Selected native backend
+      ↓
+Host operating system
+```
+
+The implementation should not be constrained to one mechanism.
+
+Possible approaches include:
+
+- Native operating-system input APIs.
+- Accessibility/UI-automation APIs.
+- Browser-specific automation when the target is a browser.
+- Virtual input devices.
+- Command-line automation utilities where they are practical.
+- A dedicated cross-platform input-injection library.
+- Different mechanisms for different operating systems or target applications.
+
+One candidate is **[Inject](https://github.com/imxade/inject)**, a low-level cross-platform native input-injection library that already exposes platform primitives for:
+
+- Linux `uinput`.
+- macOS CoreGraphics event posting.
+- Windows `SendInput`.
+- Windows synthetic pointer input.
+- Windows virtual-controller primitives.
+
+Inject should be treated as an **implementation option**, not a mandatory architectural dependency.
+
+Its current design is intentionally low-level: Butler would still own higher-level semantics such as key-name mapping, text entry, shortcuts, pointer movement policy, drag behavior, coordinate transforms, multi-monitor handling, controller mappings, cancellation, throttling, and permission policy.
+
+The final backend decision should be based on measured support for:
+
+- Mouse movement and absolute/relative positioning.
+- Click/double-click/press/release.
+- Dragging.
+- Scrolling.
+- Keyboard input and shortcuts.
+- Text entry across keyboard layouts.
+- Touch/pen where useful.
+- Virtual controller/gamepad input where useful.
+- Multi-monitor coordinate handling.
+- Interaction with ordinary desktop applications.
+- Interaction with games or rendered applications where accessibility/DOM automation is unavailable.
+- Continuous control loops for testing games or other interactive applications.
+- Platform permission/elevation behavior.
+- Reliability and latency.
+- Cancellation and emergency stop.
+- Compatibility with accessibility and semantic UI automation.
+- Compatibility with screen/vision-based control.
+
+Butler may combine several approaches rather than forcing all computer interaction through raw pointer/keyboard injection.
+
+For example:
+
+```text
+Structured desktop UI
+      ↓
+Accessibility / UI automation
+
+Browser
+      ↓
+DOM / browser automation
+
+Rendered game or canvas
+      ↓
+Screen perception
+      +
+Native input injection
+```
+
+Raw input injection is therefore one part of computer use, not the entire computer-use architecture.
+
 ### Host Authority
 
 Computer use remains bounded by the authority available to Butler and by the user's explicit permissions.
