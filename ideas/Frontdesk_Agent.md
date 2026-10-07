@@ -229,11 +229,69 @@ This creates an evolving operational knowledge base rather than a static FAQ cha
 
 ---
 
+# Tenant and Hosted Isolation Model
+
+The hosted SaaS is **multi-tenant by default**.
+
+The primary isolation boundary is the service organization that signs up for the product.
+
+For example:
+
+```text
+Tenant: ABC Clinic
+
+Providers:
+├── Dr. A
+├── Dr. B
+└── Dr. C
+
+Customers:
+├── Customer 1
+├── Customer 2
+└── Customer 3
+```
+
+A provider is normally a member of a tenant rather than a separate SaaS deployment.
+
+The normal hosted deployment should use:
+
+```text
+One shared frontend
+        +
+One shared serverless application
+        +
+One shared Azure SQL database
+        +
+Many isolated tenants
+```
+
+The application should **not** create a separate Azure SQL database, vector database, or complete application instance for every provider or tenant by default.
+
+Isolation is enforced through deterministic relational scope:
+
+```text
+tenant_id
+    ↓
+provider_id
+    ↓
+customer_id
+```
+
+The authenticated application context supplies these identifiers. The AI does not choose its tenant or customer scope.
+
+A fully isolated application environment belongs to the **self-hosted deployment model**, not to ordinary SaaS signup.
+
+---
+
 # Operational Knowledge and Vector Search
 
 Azure-hosted deployments will use **Azure SQL's native vector capabilities** to store and retrieve semantic operational knowledge.
 
-Provider responses that may be useful in future conversations can be stored together with an embedding.
+The hosted SaaS uses a shared operational knowledge table rather than creating a separate physical vector database for every provider.
+
+Provider responses that may be useful in future conversations can be stored together with an embedding and ordinary relational scope metadata such as `tenant_id`, `provider_id`, and `customer_id`.
+
+The vector determines semantic relevance. The relational columns determine which records are allowed to participate in the search.
 
 The primary use case is information that the provider supplied after the system could not answer a customer's question.
 
@@ -250,6 +308,41 @@ Examples include:
 - Temporary operational changes.
 
 This information can subsequently be retrieved through semantic similarity rather than requiring exact wording.
+
+---
+
+# Tenant-Wide Operational Knowledge
+
+Some information applies to the whole service organization rather than one provider.
+
+Examples include:
+
+- Organization-wide opening hours.
+- Holiday closures.
+- Parking information.
+- General payment procedures.
+- Common booking rules.
+- Shared office instructions.
+
+A tenant-wide record may conceptually contain:
+
+```text
+OperationalKnowledge
+├── id
+├── tenant_id
+├── provider_id = NULL
+├── customer_id = NULL
+├── scope = TENANT
+├── content
+├── embedding
+├── created_at
+├── valid_until (optional)
+└── active
+```
+
+This information may be used across providers within that tenant when relevant.
+
+It must never be visible to another tenant.
 
 ---
 
@@ -272,13 +365,15 @@ A knowledge record may conceptually contain:
 ```text
 OperationalKnowledge
 ├── id
-├── organization_id
+├── tenant_id
 ├── provider_id
 ├── customer_id = NULL
+├── scope = PROVIDER
 ├── content
 ├── embedding
 ├── created_at
 ├── updated_at
+├── valid_until (optional)
 ├── active
 └── source/reference metadata
 ```
@@ -296,7 +391,7 @@ Generate Query Embedding
        ↓
 Azure SQL Vector Search
        ↓
-FILTER organization_id
+FILTER tenant_id
        ↓
 FILTER provider_id
        ↓
@@ -332,13 +427,14 @@ A corresponding record may contain:
 ```text
 OperationalKnowledge
 ├── id
-├── organization_id
+├── tenant_id
 ├── provider_id
 ├── customer_id
+├── scope = CUSTOMER
 ├── content
 ├── embedding
 ├── created_at
-├── expires_at (optional)
+├── valid_until (optional)
 ├── active
 └── source/reference metadata
 ```
@@ -352,7 +448,7 @@ The system **must not rely on the customer's name being embedded into the vector
 Instead, retrieval must deterministically constrain the query:
 
 ```text
-organization_id = current_organization
+tenant_id = current_organization
 AND provider_id = current_provider
 AND (
     customer_id IS NULL
@@ -368,34 +464,82 @@ This ensures that vector similarity can never accidentally expose another custom
 
 # Knowledge Retrieval Rules
 
-Operational knowledge retrieval follows several rules.
+Operational knowledge retrieval is always scoped before semantic ranking.
 
 ## Customer Request
 
-A customer's retrieval scope may include:
+A customer interacting with a provider may retrieve:
 
 ```text
-1. Generic knowledge for the current provider
-2. Knowledge specifically associated with this customer
+1. Tenant-wide knowledge for the current tenant
+2. Provider-specific knowledge for the current provider
+3. Customer-specific knowledge for the current customer
 ```
 
 It must exclude:
 
 ```text
-1. Another customer's specific knowledge
-2. Another provider's knowledge
-3. Another organization's knowledge
+1. Another customer's private knowledge
+2. Another provider's provider-specific knowledge
+3. Another tenant's knowledge
 ```
+
+A conceptual authorization filter is:
+
+```text
+tenant_id = current_tenant
+AND (
+    scope = TENANT
+    OR (
+        scope = PROVIDER
+        AND provider_id = current_provider
+    )
+    OR (
+        scope = CUSTOMER
+        AND provider_id = current_provider
+        AND customer_id = current_customer
+    )
+)
+```
+
+Only the records allowed by this scope participate in vector similarity ranking.
+
+## Specificity Precedence
+
+When multiple equally relevant active records apply, prefer the more specific scope:
+
+```text
+Customer-specific
+        ↓
+Provider-specific
+        ↓
+Tenant-wide
+```
+
+A specific temporary exception therefore does not overwrite the general rule.
+
+If two active records at the same scope genuinely conflict and the system cannot deterministically determine which is current, it should ask the provider instead of guessing.
 
 ## Provider Request
 
 A provider may retrieve:
 
-- Their own generic operational knowledge.
-- Customer-specific knowledge where the operation and authorization allow it.
-- Pending questions addressed to them.
+- Tenant-wide knowledge available within their tenant.
+- Their own provider-specific operational knowledge.
+- Customer-specific knowledge only when the requested operation and authorization allow access to that customer.
+- Pending customer questions addressed to them.
 
-Provider access remains subject to application authorization.
+Provider access remains subject to deterministic application authorization.
+
+## Safe Storage Default for Escalated Answers
+
+A response produced because of one customer's escalated question should default to **customer-specific** knowledge unless it is clearly marked as generally applicable.
+
+If the provider indicates that the answer applies to everyone, it may be stored at provider or tenant scope.
+
+For ambiguous cases, the bot may ask whether the information should be remembered for all customers.
+
+This prevents a private answer from accidentally becoming generic knowledge.
 
 ---
 
@@ -454,6 +598,30 @@ Embedding generation should remain behind the AI/model abstraction so deployment
 
 ---
 
+# Embedding Consistency and Failure Handling
+
+For the shared hosted Azure SQL vector store, embeddings stored in the same vector column must use a consistent platform-selected embedding configuration.
+
+A service provider may choose their own conversational model through AI SDK without implicitly changing the embedding representation used by the shared knowledge store.
+
+Embedding generation is asynchronous from the provider/customer conversation where practical.
+
+If storing the source text succeeds but embedding generation fails:
+
+```text
+Store source text
+      ↓
+embedding_status = PENDING
+      ↓
+Reply to the waiting customer
+      ↓
+Retry embedding generation later
+```
+
+The original provider answer remains the source of truth. The embedding is only a retrieval index.
+
+---
+
 # Spam Management
 
 Providers can mark contacts as spam.
@@ -484,29 +652,33 @@ The language model should never receive database credentials or unrestricted dat
 
 Instead, it interacts with narrowly scoped backend tools such as:
 
-`get_customer_appointments(customer_id)`
+`get_my_appointments()`
 
-`get_provider_availability(provider_id)`
+`get_provider_availability()`
 
-`book_appointment(customer_id, slot_id)`
+`book_my_appointment(slot_id)`
 
-`reschedule_appointment(customer_id, appointment_id, slot_id)`
+`reschedule_my_appointment(appointment_id, slot_id)`
 
-`update_provider_availability(provider_id, schedule)`
+`cancel_my_appointment(appointment_id)`
 
-`mark_spam(provider_id, contact_id)`
+`update_my_provider_availability(schedule)`
 
-`remove_spam(provider_id, contact_id)`
+`mark_spam(contact_reference)`
 
-`list_spam(provider_id)`
+`remove_spam(contact_reference)`
 
-`create_reminder(customer_id, date, type)`
+`list_spam()`
 
-`broadcast_message(provider_id, audience, message)`
+`create_followup_reminder(customer_reference, date, type)`
 
-`search_operational_knowledge(scope, query)`
+`broadcast_message(audience, message)`
+
+`search_operational_knowledge(query)`
 
 `store_operational_knowledge(scope, content)`
+
+The authenticated tenant, provider, and customer identities are injected by application code rather than selected freely by the model.
 
 Authorization is validated by the backend rather than delegated to the AI.
 
@@ -685,6 +857,29 @@ Identity resolution and authorization occur outside the model.
 
 ---
 
+# Identity Edge Cases
+
+A phone number, Telegram account, or other external identifier is **not a globally unique customer record across the entire SaaS**.
+
+The same person may interact independently with multiple service organizations.
+
+For example:
+
+```text
+Clinic A → Customer A17 → +91XXXXXXXXXX
+Clinic B → Customer B42 → +91XXXXXXXXXX
+```
+
+Those customer relationships remain isolated.
+
+Incoming messages should resolve the tenant from the receiving messaging connection first, and then resolve the sender within that tenant.
+
+The same customer may also use multiple messaging channels. Those identities must not be merged solely because names or usernames look similar. Linking identities requires a trusted verification flow.
+
+A changed phone number must not automatically inherit another number's records based on AI reasoning.
+
+---
+
 # Channel-Agnostic Messaging Gateway
 
 Messaging providers should be separated from the core application.
@@ -818,6 +1013,26 @@ This can point to:
 - A custom AI SDK provider integration.
 
 This makes AI-provider choice independent of infrastructure choice.
+
+---
+
+# Hosted and Local AI Endpoints
+
+A local URL such as:
+
+```text
+http://localhost:8000/v1
+```
+
+is meaningful only from the machine or container making the request.
+
+This works naturally for a self-hosted deployment where the AI endpoint is locally reachable.
+
+The hosted SaaS cannot directly use a service provider's `localhost` endpoint. A provider-supplied endpoint used by the hosted service must be securely network-accessible from the hosted application.
+
+The platform must not silently fall back from a provider-selected AI service to a platform model unless that fallback behavior has been explicitly configured.
+
+This avoids changing privacy, billing, or data-processing expectations without consent.
 
 ---
 
@@ -1236,6 +1451,20 @@ Two primary distribution models are planned.
 
 The project operates the infrastructure and organizations subscribe to the service.
 
+The default hosted architecture is shared and multi-tenant:
+
+```text
+Shared Next.js frontend
+        +
+Shared serverless backend
+        +
+Shared Azure SQL database
+        +
+Tenant/provider/customer scoped data
+```
+
+Ordinary account creation does not provision a new application stack, Azure SQL database, or vector database.
+
 The hosted version may provide:
 
 - Azure-hosted infrastructure.
@@ -1515,6 +1744,170 @@ Scheduled operations should be idempotent where possible so retries do not creat
 
 ---
 
+# Practical Correctness and Reliability Edge Cases
+
+The initial implementation should handle the following cases without introducing unnecessary infrastructure.
+
+## Concurrent Booking
+
+Two customers may attempt to book the same slot at nearly the same time.
+
+Availability displayed earlier is not sufficient authorization to book.
+
+The state-changing database operation must validate and claim the slot atomically.
+
+Only one booking succeeds. The other request receives updated availability.
+
+## Provider Availability Changes During Booking
+
+If a provider changes availability after a customer was shown a slot but before the booking commits, the database state wins.
+
+The invalid slot is rejected and alternatives are offered.
+
+## Availability Changes Affect Existing Appointments
+
+If a provider removes availability that contains existing appointments:
+
+```text
+Existing appointment
+      ↓
+Mark as affected / needs rescheduling
+      ↓
+Notify customer
+      ↓
+Customer selects replacement
+```
+
+The system must not silently move or cancel the appointment.
+
+## Duplicate and Out-of-Order Messages
+
+Messaging platforms and webhook infrastructure may retry or deliver messages out of order.
+
+Where available, incoming messages should be deduplicated using a key such as:
+
+```text
+tenant_id
+channel_connection_id
+external_message_id
+```
+
+Every state-changing tool must re-check current database state before committing.
+
+## Idempotent Mutations
+
+A model/tool retry must not execute the same state change twice.
+
+For example, if booking succeeds but response generation fails, retrying the request must return the existing result rather than creating a second appointment.
+
+State-changing operations should therefore carry an idempotency/operation identifier where appropriate.
+
+## Timed Functions Are Scanners
+
+Timer-triggered functions should discover durable due work rather than represent the work themselves.
+
+A scheduled record may contain:
+
+```text
+id
+tenant_id
+type
+due_at
+status
+attempt_count
+claimed_at
+completed_at
+idempotency_key
+```
+
+If a timer invocation is missed or processing fails, a later scan can rediscover unfinished due work.
+
+A reminder job must re-read the current appointment state before sending because the appointment may have been cancelled, rescheduled, or completed after the reminder was created.
+
+## Outbound Delivery Is Separate From State Changes
+
+Successful appointment or schedule updates must not depend on immediate WhatsApp or Telegram delivery.
+
+Conceptually:
+
+```text
+Database state change
+        +
+Outbound message/event record
+        ↓
+Commit
+        ↓
+Independent delivery attempt
+```
+
+A messaging outage therefore does not corrupt appointment state.
+
+Large broadcasts should similarly be split into bounded per-recipient work rather than one long-running function execution.
+
+## High-Impact Provider Actions
+
+Clear customer actions such as booking a named slot do not require unnecessary repeated confirmation.
+
+However, provider actions with broad impact should show their effect before execution.
+
+Examples include:
+
+- Broadcasting to a large audience.
+- Changing availability that affects existing appointments.
+- Blocking a large set of contacts.
+
+## Spam Is Not Cancellation
+
+Marking a contact as spam stops normal interaction and outbound communication.
+
+It does not:
+
+- cancel appointments,
+- delete the customer,
+- delete historical service records.
+
+These are separate operations.
+
+## AI Failure Does Not Corrupt Operational State
+
+AI availability is separate from database correctness.
+
+If the configured model is unavailable:
+
+- existing appointments remain valid,
+- deterministic scheduled processing may continue where AI is not required,
+- the application must not fabricate a successful action.
+
+If a database mutation cannot be confirmed, the assistant must not claim that it succeeded.
+
+## Vector Retrieval Can Return No Answer
+
+The closest vector is not automatically a valid answer.
+
+If no authorized knowledge record is sufficiently relevant, the system should treat the result as unknown and escalate to the provider.
+
+## Knowledge Conflicts
+
+If two active records at the same scope conflict and metadata cannot determine which one is current, the system should ask the provider.
+
+Semantic similarity must not be used to decide which factual statement is true.
+
+## Bounded Context
+
+Large schedule or knowledge requests must be bounded or paginated before being passed to the model.
+
+The AI may format authorized records into structured text, but it should not receive arbitrarily large database result sets.
+
+## Time Handling
+
+Concrete appointment timestamps should be stored in UTC.
+
+Tenant/provider timezone information is stored separately for schedule interpretation and display.
+
+Authoritative timezone conversion and scheduling calculations belong to deterministic application code rather than the model.
+
+---
+
 # MVP
 
 The first meaningful version should focus on the core front-desk workflow.
@@ -1640,6 +2033,28 @@ The application backend remains the authority for permissions and state.
 
 ---
 
+# Architecture Decisions Explicitly Kept Simple
+
+The initial hosted system does **not** require:
+
+- A separate vector database per provider.
+- A separate Azure SQL database per tenant.
+- A separate application deployment per tenant.
+- Automatic Azure infrastructure provisioning on every signup.
+- Cross-tenant customer identity merging.
+- Semantic deduplication of unresolved provider questions.
+- Arbitrary AI-generated SQL.
+- AI-based authorization.
+- Long-running persistent bot workers.
+
+The default rule is:
+
+> **Share infrastructure; isolate data deterministically.**
+
+Self-hosting provides complete deployment isolation when an organization wants to run its own application environment.
+
+---
+
 # Architectural Principles
 
 1. **Least privilege**  
@@ -1649,7 +2064,7 @@ The application backend remains the authority for permissions and state.
    Permissions are enforced by application code, not model reasoning.
 
 3. **Tenant isolation**  
-   Organization, provider, and customer boundaries are represented explicitly in relational data and enforced before data reaches the AI.
+   Tenant, provider, and customer boundaries are represented explicitly in relational data and enforced before data reaches the AI.
 
 4. **Vector search is retrieval, not authorization**  
    Semantic similarity determines relevance only after deterministic scope filtering.
@@ -1711,6 +2126,8 @@ Instead of ending a conversation when information is unavailable, the system can
 Generic provider answers become reusable provider knowledge.
 
 Customer-specific answers remain associated with that customer and cannot become visible to unrelated customers.
+
+The hosted SaaS shares application and database infrastructure by default while enforcing deterministic tenant, provider, and customer boundaries for both relational and vector retrieval.
 
 Azure SQL provides both relational operational state and vector-backed semantic retrieval for hosted deployments, while Prisma remains the primary application data-access abstraction.
 
