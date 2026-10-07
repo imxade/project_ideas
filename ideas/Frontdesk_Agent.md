@@ -10,6 +10,8 @@ The initial target market is **doctors and clinics**, where front-desk operation
 
 For healthcare deployments, the system will intentionally operate only on **service and scheduling records, not medical records**.
 
+As a final deliverable, the project will also include a **hosted demonstration instance** operated by us. Access to this instance will be limited to explicitly authorized demo accounts so the complete workflow and practical usage of the product can be shown during pitches, reviews, or demonstrations without exposing the hosted environment as an unrestricted public service.
+
 ---
 
 # Core Principle
