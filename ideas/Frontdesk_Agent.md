@@ -86,6 +86,7 @@ A customer can:
 - Respond to provider messages.
 - Receive recurring or future service reminders.
 - Ask operational questions about the service provider.
+- Explore available products or services conversationally, including options relevant to their interests.
 
 The customer can only interact with information associated with their verified identity and information that the provider has made generally available.
 
@@ -945,6 +946,18 @@ Other ─────┘
 The supported channel adapters include **WhatsApp, Telegram, Discord, and embeddable website chat**. Additional channels can later implement the same gateway interface.
 
 The internal application works with a normalized message format instead of depending directly on WhatsApp, Telegram, or another messaging platform.
+
+## Embedded Website Chat and Service Discovery
+
+Providers can embed the **same customer-facing agent** directly on their landing pages, product pages, and service pages. Visitors can ask questions without opening a separate chat app or messaging channel.
+
+- The chat can use the current page or product as relevant context while still retrieving from the provider's broader authorized knowledge and catalog.
+- Visitors can describe what they are looking for; the agent can help them **explore and compare published products, services, projects, or offerings** from that provider, based on their needs and interests, and link to relevant pages.
+- Product/service names, prices, availability, and other changing details should come from the provider's current supplied catalog or connected sources, not model invention. This is conversational discovery, not an additional commerce or checkout system.
+- Anonymous visitors may access only information explicitly published for public consumption. Personal records, appointment changes, and protected provider operations continue to require appropriate verified identity and authorization.
+- The embedded channel reuses the existing tenant-scoped gateway, AI, knowledge, and scheduling workflows rather than creating a separate agent implementation.
+
+Website integration is distinct from the separately restricted **hosted demonstration instance**: providers may place customer-facing chat on their own sites, while our shared demonstration environment remains access-controlled.
 
 ---
 
@@ -1952,6 +1965,7 @@ The first meaningful version should focus on the core front-desk workflow.
 - Cancel where permitted.
 - Confirm upcoming appointments.
 - Ask operational questions.
+- Explore published products/services from provider websites or connected catalogs.
 - Receive provider responses.
 
 ## Operational Knowledge
@@ -1984,7 +1998,7 @@ The first meaningful version should focus on the core front-desk workflow.
 - Telegram.
 - WhatsApp.
 - Discord.
-- Embeddable website chat.
+- Embeddable website chat for landing/product/service pages.
 
 ## AI
 
@@ -2172,13 +2186,13 @@ These are **two applications of the same general-purpose front desk**, not separ
 
 **Interfaces**
 
-- **Patient-facing:** Patients message the clinic through WhatsApp, Telegram, or supported website chat to ask questions and manage appointments.
+- **Patient-facing:** Patients message the clinic through WhatsApp or Telegram, or ask questions directly using chat embedded on the clinic's landing or service pages, without needing a separate messaging app.
 - **Provider-facing:** Authorized clinic staff use their chat interface to update availability, supply operational information, answer escalated questions, and request announcements.
 
 **Example workflow**
 
 1. **Add operational context.** Staff tell the agent: "We're hosting a patient orientation event next Saturday at 3 PM in Hall B," or provide details of a time-limited service offer. The agent stores the announcement with its resolved date, location, conditions, and validity period, along with any supporting documents or links.
-2. **Answer customer questions.** A patient asks about the venue, event timing, offer eligibility, opening hours, or appointment availability. The agent answers using current authorized context. Once an event has passed or an offer has expired, it explains that it is no longer current rather than promoting the old announcement.
+2. **Answer customer questions.** A patient asks on the clinic's service page or messaging channel about the venue, event timing, available services, offer eligibility, opening hours, or appointment availability. The agent answers using current authorized context. Once an event has passed or an offer has expired, it explains that it is no longer current rather than promoting the old announcement.
 3. **Escalate and learn.** If the patient asks something not covered by the stored information, the agent contacts authorized clinic staff. They reply through their provider-facing chat, optionally attaching a file or link. The agent returns the answer to the original patient and stores it with the correct knowledge scope for later use.
 4. **Notify when instructed.** Staff can ask the agent to announce the event, offer, or changed schedule to an appropriate set of patients. The announcement is sent through the configured messaging channels rather than being broadcast automatically whenever context changes.
 5. **Coordinate appointments.** Patients book, cancel, or reschedule within staff-defined availability. If availability changes, affected patients are notified and offered valid replacement slots.
@@ -2190,13 +2204,13 @@ These are **two applications of the same general-purpose front desk**, not separ
 
 **Interfaces**
 
-- **Contributor-facing:** Contributors interact with the agent through a **Discord bot** in supported channels or conversations; the organization may also embed the chat on its website.
+- **Contributor-facing:** Contributors interact with the agent through a **Discord bot** in supported channels or conversations, or directly through chat embedded on the organization's website and project pages.
 - **Maintainer-facing:** Authorized maintainers use the **provider-facing interface** (such as a protected bot conversation or admin chat) to provide context, manage their availability, answer escalations, and request announcements. They are the service providers in this example.
 
 **Example workflow**
 
 1. **Connect sources.** Maintainers give the agent general organization instructions, documentation, uploaded ZIP archives, and links to public GitHub repositories. The system indexes useful source content and can fetch current public issues, pull requests, workflow runs, and available action logs when a question needs fresh information.
-2. **Answer contributor questions.** A contributor asks on Discord how to set up a project, why a PR is failing, where to find a policy, or what events are coming up. The agent retrieves the relevant authorized documentation or live repository information and responds through the contributor-facing Discord interface.
+2. **Answer contributor questions and guide discovery.** A contributor asks through Discord or the organization's website how to set up a project, why a PR is failing, where to find a policy, or what events are coming up. A website visitor can also describe their interests and ask which of the organization's published projects or offerings are relevant. The agent retrieves the relevant authorized documentation or live repository information and responds through the contributor-facing Discord interface.
 3. **Escalate unknown questions.** If the answer is missing or unreliable, the agent creates a pending question and contacts the appropriate maintainer through the **maintainer-facing interface**, without sending the contributor into a separate support system.
 4. **Learn and return to the contributor.** The maintainer supplies an explanation, a file, a ZIP archive, or a link. The agent uses it to answer the **original contributor** in their Discord conversation and stores appropriately scoped, source-linked context so similar future questions can be answered without repeated escalation.
 5. **Manage events and announcements.** A maintainer says: "We have a contributor onboarding session one week from now at 6 PM," adds a venue or meeting link, and optionally asks the agent to notify the relevant audience. The date is resolved when the context is added. Subsequent questions receive the correct upcoming, current, cancelled, or past-event status.
