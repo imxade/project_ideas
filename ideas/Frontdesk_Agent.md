@@ -2,13 +2,11 @@
 
 ## Product Idea
 
-AI Front Desk is a conversational coordination layer between a **service provider** and their **customers**.
+AI Front Desk is a general-purpose conversational coordination layer between **any service provider** and their **customers or participants**, covering operational questions, knowledge access, booking, meetings, and service coordination.
 
 Instead of behaving like a traditional customer-support chatbot that only answers FAQs, the system maintains operational context, has controlled access to service records and schedules, asks the service provider for missing information when necessary, and can execute predefined actions such as booking, rescheduling, notifications, reminders, and broadcasts.
 
-The initial target market is **doctors and clinics**, where front-desk operations represent a significant recurring cost.
-
-For healthcare deployments, the system will intentionally operate only on **service and scheduling records, not medical records**.
+The same core product is intended to serve different industries and organizations without separate industry-specific implementations. Where used in healthcare, its scope remains **service and scheduling records, not medical records**.
 
 As a final deliverable, the project will also include a **hosted demonstration instance** operated by us. Access to this instance will be limited to explicitly authorized demo accounts so the complete workflow and practical usage of the product can be shown during pitches, reviews, or demonstrations without exposing the hosted environment as an unrestricted public service.
 
@@ -46,7 +44,7 @@ The model never receives arbitrary access to other customers or unrestricted dat
 
 ## Service Provider
 
-Initially, the service provider may be a doctor or clinic.
+A service provider may be an individual professional, team, business, or organization.
 
 A provider can:
 
@@ -60,7 +58,8 @@ A provider can:
 - View numbers marked as spam.
 - Mark a customer/contact as spam.
 - Remove a number from the spam list.
-- Define future reminder intervals for customers.
+- Configure reminder timing for appointments, meetings, and follow-ups.
+- Supply documentation, archives, links, and other approved knowledge sources.
 - Answer customer questions escalated by the AI.
 - Provide operational information that can be reused for future customer questions.
 
@@ -134,7 +133,7 @@ Retrieval, authorization, and filtering of the underlying records remain determi
 
 # Scheduling Model
 
-Provider availability and customer appointments are deliberately separated.
+Provider availability and customer bookings are deliberately separated. Bookings may represent appointments, meetings, consultations, or other scheduled services.
 
 The provider controls:
 
@@ -146,19 +145,19 @@ The customer controls:
 
 Example:
 
-A doctor originally works:
+A service provider originally works:
 
 Monday  
 Wednesday  
 Friday
 
-The doctor changes the schedule to:
+The provider changes the schedule to:
 
 Monday–Friday, 10:00 AM–5:00 PM.
 
 The system updates provider availability.
 
-If instead the doctor removes Wednesday from their schedule, the system detects appointments affected by the change.
+If instead the provider removes Wednesday from their schedule, the system detects bookings affected by the change.
 
 Affected customers receive a message such as:
 
@@ -186,7 +185,7 @@ Send confirmation to the customer.
 
 ## Appointment Approaching
 
-One day before the appointment, ask the customer to confirm attendance.
+Send confirmations and reminders at provider-configured times (for example, one day, 20 minutes, or 10 minutes before an appointment or meeting). Notify the relevant participants and optionally request attendance confirmation.
 
 ## Customer Declines
 
@@ -206,15 +205,15 @@ Allow the provider to instruct the system to send a message to a defined group o
 
 One major distinction from conventional support bots is that the bot should not simply fail when information is missing.
 
-If a customer asks something that the system cannot answer from existing authorized information, but the service provider can answer it, the system creates a provider query.
+If a customer asks something that the system cannot answer from existing authorized information, but the service provider can answer it, the system creates a provider query. The provider may respond with text or supply additional files or links.
 
 For example:
 
 Customer:
 
-> Will the clinic be open during the holiday next month?
+> Will your office be open during the holiday next month?
 
-If no answer exists in the available operational knowledge, the system asks the provider.
+If no answer exists in the available operational knowledge or approved sources, the system asks the provider.
 
 The provider answers:
 
@@ -231,6 +230,19 @@ This creates an evolving operational knowledge base rather than a static FAQ cha
 
 ---
 
+# Knowledge Sources and Ingestion
+
+Service providers can add knowledge through **plain text, documents, uploaded ZIP archives, links, and public repositories** (including GitHub). General provider instructions and policies can be stored alongside these sources.
+
+- Uploaded files and archives are extracted and processed as source-linked content; relevant text is chunked, embedded, and made searchable within the existing tenant/provider/customer access boundaries.
+- Provided URLs can be saved as sources. Repository documentation and code can be indexed, while time-sensitive public information (such as issues, pull requests, workflow runs, and available action logs) can be fetched when a question requires current details.
+- If a source does not answer a question, the agent escalates to the provider, who can reply with text or provide another document or link. The agent then responds to the original requester and stores reusable knowledge with the appropriate scope.
+- Importing and refreshing sources uses bounded background jobs rather than scanning large archives or repositories during a single chat request. Only approved or publicly accessible material should be retrieved; files are treated as data, not executable instructions.
+
+The system should retain source references so responses can be grounded in the information actually retrieved.
+
+---
+
 # Tenant and Hosted Isolation Model
 
 The hosted SaaS is **multi-tenant by default**.
@@ -240,7 +252,7 @@ The primary isolation boundary is the service organization that signs up for the
 For example:
 
 ```text
-Tenant: ABC Clinic
+Tenant: Service Organization A
 
 Providers:
 ├── Dr. A
@@ -868,8 +880,8 @@ The same person may interact independently with multiple service organizations.
 For example:
 
 ```text
-Clinic A → Customer A17 → +91XXXXXXXXXX
-Clinic B → Customer B42 → +91XXXXXXXXXX
+Service A → Customer A17 → +91XXXXXXXXXX
+Service B → Customer B42 → +91XXXXXXXXXX
 ```
 
 Those customer relationships remain isolated.
@@ -920,12 +932,7 @@ Other ─────┘
                Azure SQL
 ```
 
-The initial MVP only needs:
-
-- WhatsApp.
-- Telegram.
-
-Additional channels can later implement the same gateway interface.
+The supported channel adapters include **WhatsApp, Telegram, Discord, and embeddable website chat**. Additional channels can later implement the same gateway interface.
 
 The internal application works with a normalized message format instead of depending directly on WhatsApp, Telegram, or another messaging platform.
 
@@ -1236,7 +1243,7 @@ ReminderDue Event
       ↓
 Messaging Function
       ↓
-WhatsApp / Telegram
+Configured Messaging Channel
       ↓
 Update Azure SQL
 ```
@@ -1245,7 +1252,7 @@ Update Azure SQL
 
 # Routine Follow-Up Example
 
-Suppose a doctor recommends that a customer return after six months.
+Suppose a service provider asks a customer to return for a follow-up after six months.
 
 Only the operational follow-up requirement needs to be stored.
 
@@ -1939,6 +1946,8 @@ The first meaningful version should focus on the core front-desk workflow.
 
 ## Operational Knowledge
 
+- Text, document, ZIP, URL, and public-repository sources.
+- Source ingestion and retrieval of current external information when needed.
 - Provider question escalation.
 - Generic provider knowledge.
 - Customer-specific knowledge.
@@ -1951,7 +1960,7 @@ The first meaningful version should focus on the core front-desk workflow.
 ## Automation
 
 - Appointment confirmation.
-- One-day-before reminders.
+- Configurable reminders before appointments or meetings (for example, one day, 20 minutes, or 10 minutes in advance).
 - Appointment confirmation requests.
 - Provider schedule-change notifications.
 - Rescheduling workflows.
@@ -1964,6 +1973,8 @@ The first meaningful version should focus on the core front-desk workflow.
 
 - Telegram.
 - WhatsApp.
+- Discord.
+- Embeddable website chat.
 
 ## AI
 
@@ -2093,7 +2104,7 @@ Self-hosting provides complete deployment isolation when an organization wants t
     Time-based workflows use timer-triggered functions rather than continuously running schedulers.
 
 12. **Channel independence**  
-    Telegram and WhatsApp are adapters around a common messaging interface.
+    Telegram, WhatsApp, Discord, and embeddable website chat are adapters around a common messaging interface.
 
 13. **Provider/customer separation**  
     Providers control availability; customers control their appointments within that availability.
@@ -2140,3 +2151,19 @@ Timer-triggered serverless functions handle scheduled work without requiring con
 floci-az allows the architecture to be validated, operated, and self-hosted independently of Azure.
 
 This makes the system a persistent operational intermediary between the service provider and customer rather than another FAQ chatbot.
+
+---
+
+# Example Use Cases
+
+These are illustrations of the same general-purpose front-desk system, not separate products.
+
+## Clinic Front Desk
+
+A clinic configures its staff availability and lets patients book or reschedule appointments through messaging. When availability changes, affected patients are notified and offered valid alternatives. The system sends configurable appointment and routine follow-up reminders, answers administrative questions from authorized operational knowledge, and escalates unanswered questions to clinic staff. It does not access medical records.
+
+## Open-Source Organization Front Desk
+
+An open-source organization connects a **Discord bot** and optionally embeds the same chat experience on its website. Maintainers upload documentation or ZIP archives and add links to public repositories. Contributors can ask about project files, issues, pull requests, and available CI/action logs. The agent retrieves relevant indexed or current public information, and escalates unanswered questions to maintainers, who can respond with text, files, or links.
+
+Contributors can also book meetings with maintainers based on their configured availability. Both sides receive applicable notifications, such as reminders **10 or 20 minutes before a meeting**. Answers supplied by maintainers become appropriately scoped knowledge for future requests.
