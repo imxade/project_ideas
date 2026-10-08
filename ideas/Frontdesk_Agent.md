@@ -197,7 +197,7 @@ If a provider recommends another visit after three months, six months, or anothe
 
 ## Provider Broadcast
 
-Allow the provider to instruct the system to send a message to a defined group of customers.
+Allow the provider to instruct the system to send a message to a defined group of customers, including announcements about upcoming events, current offers, and operational changes. The provider supplies the details conversationally and may request a targeted notification; merely adding knowledge does not automatically broadcast it.
 
 ---
 
@@ -576,13 +576,23 @@ For temporary information such as:
 
 > We're closed next Tuesday.
 
-an expiration date can prevent obsolete information from being returned later.
+an expiration date can prevent obsolete information from being presented as current.
 
-The system may therefore combine:
+## Time-Sensitive Knowledge
 
-**semantic relevance + scope + validity period + current state**
+Events, offers, temporary closures, and other dated announcements should be stored with their actual effective dates, times, and timezone where available.
 
-when retrieving knowledge.
+- Resolve relative phrases such as "one week from now" against the **original message timestamp** and the provider's timezone, not the date of a future customer query. Ask for clarification if the date or time is genuinely ambiguous.
+- When a provider gives a start/end date or cancellation, retain that structured validity information alongside the source text and embedding.
+- Before answering questions about current or upcoming events/offers, compare those dates against the current time. Do not present expired or cancelled information as still active.
+- Historical information can remain stored for accurately answering questions about past events, but must be clearly described as past. Corrections and cancellations take precedence over stale announcements.
+- If no reliable current information is available, ask the provider instead of assuming an old announcement still applies.
+
+The system therefore combines:
+
+**semantic relevance + authorized scope + source context + validity period + current state**
+
+when retrieving knowledge. Embeddings find potentially relevant text; deterministic time checks establish whether a dated claim is still applicable.
 
 ---
 
@@ -2156,14 +2166,41 @@ This makes the system a persistent operational intermediary between the service 
 
 # Example Use Cases
 
-These are illustrations of the same general-purpose front-desk system, not separate products.
+These are **two applications of the same general-purpose front desk**, not separate products or separate architectures.
 
-## Clinic Front Desk
+## 1. Clinic Front Desk
 
-A clinic configures its staff availability and lets patients book or reschedule appointments through messaging. When availability changes, affected patients are notified and offered valid alternatives. The system sends configurable appointment and routine follow-up reminders, answers administrative questions from authorized operational knowledge, and escalates unanswered questions to clinic staff. It does not access medical records.
+**Interfaces**
 
-## Open-Source Organization Front Desk
+- **Patient-facing:** Patients message the clinic through WhatsApp, Telegram, or supported website chat to ask questions and manage appointments.
+- **Provider-facing:** Authorized clinic staff use their chat interface to update availability, supply operational information, answer escalated questions, and request announcements.
 
-An open-source organization connects a **Discord bot** and optionally embeds the same chat experience on its website. Maintainers upload documentation or ZIP archives and add links to public repositories. Contributors can ask about project files, issues, pull requests, and available CI/action logs. The agent retrieves relevant indexed or current public information, and escalates unanswered questions to maintainers, who can respond with text, files, or links.
+**Example workflow**
 
-Contributors can also book meetings with maintainers based on their configured availability. Both sides receive applicable notifications, such as reminders **10 or 20 minutes before a meeting**. Answers supplied by maintainers become appropriately scoped knowledge for future requests.
+1. **Add operational context.** Staff tell the agent: "We're hosting a patient orientation event next Saturday at 3 PM in Hall B," or provide details of a time-limited service offer. The agent stores the announcement with its resolved date, location, conditions, and validity period, along with any supporting documents or links.
+2. **Answer customer questions.** A patient asks about the venue, event timing, offer eligibility, opening hours, or appointment availability. The agent answers using current authorized context. Once an event has passed or an offer has expired, it explains that it is no longer current rather than promoting the old announcement.
+3. **Escalate and learn.** If the patient asks something not covered by the stored information, the agent contacts authorized clinic staff. They reply through their provider-facing chat, optionally attaching a file or link. The agent returns the answer to the original patient and stores it with the correct knowledge scope for later use.
+4. **Notify when instructed.** Staff can ask the agent to announce the event, offer, or changed schedule to an appropriate set of patients. The announcement is sent through the configured messaging channels rather than being broadcast automatically whenever context changes.
+5. **Coordinate appointments.** Patients book, cancel, or reschedule within staff-defined availability. If availability changes, affected patients are notified and offered valid replacement slots.
+6. **Send timed reminders.** The agent sends appointment confirmations, configurable reminders, attendance requests, and provider-specified follow-up reminders.
+
+**Boundary:** This workflow handles front-desk operations and service information, **not medical records, diagnosis, or clinical advice**.
+
+## 2. Open-Source Organization Front Desk (Discord)
+
+**Interfaces**
+
+- **Contributor-facing:** Contributors interact with the agent through a **Discord bot** in supported channels or conversations; the organization may also embed the chat on its website.
+- **Maintainer-facing:** Authorized maintainers use the **provider-facing interface** (such as a protected bot conversation or admin chat) to provide context, manage their availability, answer escalations, and request announcements. They are the service providers in this example.
+
+**Example workflow**
+
+1. **Connect sources.** Maintainers give the agent general organization instructions, documentation, uploaded ZIP archives, and links to public GitHub repositories. The system indexes useful source content and can fetch current public issues, pull requests, workflow runs, and available action logs when a question needs fresh information.
+2. **Answer contributor questions.** A contributor asks on Discord how to set up a project, why a PR is failing, where to find a policy, or what events are coming up. The agent retrieves the relevant authorized documentation or live repository information and responds through the contributor-facing Discord interface.
+3. **Escalate unknown questions.** If the answer is missing or unreliable, the agent creates a pending question and contacts the appropriate maintainer through the **maintainer-facing interface**, without sending the contributor into a separate support system.
+4. **Learn and return to the contributor.** The maintainer supplies an explanation, a file, a ZIP archive, or a link. The agent uses it to answer the **original contributor** in their Discord conversation and stores appropriately scoped, source-linked context so similar future questions can be answered without repeated escalation.
+5. **Manage events and announcements.** A maintainer says: "We have a contributor onboarding session one week from now at 6 PM," adds a venue or meeting link, and optionally asks the agent to notify the relevant audience. The date is resolved when the context is added. Subsequent questions receive the correct upcoming, current, cancelled, or past-event status.
+6. **Coordinate meetings.** Contributors request time with a maintainer or mentor through Discord. The agent shows valid availability, handles booking/rescheduling, and notifies both parties of changes.
+7. **Send reminders.** Scheduled notifications can remind the contributor and maintainer **10 or 20 minutes before their meeting**, according to the configured reminder rules.
+
+**Shared behavior:** The Discord bot is the consumer-facing front desk; maintainer conversations are the provider-facing side of the **same agent and underlying scheduling, knowledge, escalation, and notification system**.
