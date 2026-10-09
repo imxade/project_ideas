@@ -202,33 +202,72 @@ Allow the provider to instruct the system to send a message to a defined group o
 
 ---
 
-# Context Escalation
+# Context Escalation and Asynchronous Follow-Up
 
-One major distinction from conventional support bots is that the bot should not simply fail when information is missing.
+The agent must not end a conversation or wait for the provider whenever information is unavailable. **Unresolved questions are independent, durable requests**, not blocked conversations.
 
-If a customer asks something that the system cannot answer from existing authorized information, but the service provider can answer it, the system creates a provider query. The provider may respond with text or supply additional files or links.
+## Missing or Unreliable Context
+
+When the agent cannot answer a question using authorized information or sources:
+
+1. Tell the customer that the information is not currently available and that the agent will ask the service provider and follow up when an answer is received.
+2. Store a **pending question**, linked to the tenant, appropriate provider, original customer, conversation/channel, and original question.
+3. Notify the authorized provider through the provider-facing interface as a separate, asynchronous action.
+4. **Continue handling further messages and unrelated questions immediately.** Other questions, bookings, and reminders must not wait for the provider.
+
+Multiple pending questions may accumulate for the same customer or across different customers. Each remains traceable and independently resolvable.
+
+## Customer-Requested Clarification
+
+A customer can also escalate an answer that was supplied but was unclear, incomplete, incorrect, or otherwise unsatisfactory.
 
 For example:
 
-Customer:
+> That doesn't answer my question. Can you check with the service provider?
 
-> Will your office be open during the holiday next month?
+This follows the **same pending-question workflow**, preserving the original question, the answer given, and the customer's clarification or objection. It does not interrupt the rest of the conversation.
 
-If no answer exists in the available operational knowledge or approved sources, the system asks the provider.
+## Provider Answer and Return
 
-The provider answers:
+The provider may respond with text, a document, a ZIP archive, or a link. When the information is available and validated for the relevant scope:
 
-> Yes, but only until 1 PM.
+1. Store the source information as appropriately scoped operational knowledge.
+2. Check **open pending questions** that the new information may answer, including questions from more than one customer.
+3. Re-evaluate each candidate question against its authorized tenant/provider/customer scope and the new source; relevance alone does not prove that a question is resolved.
+4. Send the specific answer or clarification back through the **original customer's conversation/channel**, even if they have asked other questions since.
+5. Mark only the successfully resolved questions as complete; unrelated or insufficiently answered questions remain pending.
 
-The system can then:
+Knowledge embedding and indexing may continue asynchronously without holding up a follow-up that can already be answered from validated source text.
 
-1. Reply to the original customer.
-2. Store the provider's response as operational knowledge.
-3. Generate an embedding for semantic retrieval.
-4. Use that information when appropriate future questions are asked.
+Conceptually:
 
-This creates an evolving operational knowledge base rather than a static FAQ chatbot.
+```text
+Customer asks ──> Answer available? ──Yes──> Reply
+                       │
+                       No
+                       ▼
+               Create pending question
+                       │
+              ┌────────┴────────┐
+              ▼                 ▼
+      Notify provider    Acknowledge customer
+              │                 │
+        Provider later      Conversation keeps
+        supplies context     working normally
+              │
+              ▼
+        Match authorized
+        pending questions
+              │
+              ▼
+      Answer original users
+      and resolve only those
+      questions actually answered
+```
 
+The same process applies when a customer requests escalation after an unsatisfactory answer.
+
+---
 ---
 
 # Knowledge Sources and Ingestion
@@ -237,7 +276,7 @@ Service providers can add knowledge through **plain text, documents, uploaded ZI
 
 - Uploaded files and archives are extracted and processed as source-linked content; relevant text is chunked, embedded, and made searchable within the existing tenant/provider/customer access boundaries.
 - Provided URLs can be saved as sources. Repository documentation and code can be indexed, while time-sensitive public information (such as issues, pull requests, workflow runs, and available action logs) can be fetched when a question requires current details.
-- If a source does not answer a question, the agent escalates to the provider, who can reply with text or provide another document or link. The agent then responds to the original requester and stores reusable knowledge with the appropriate scope.
+- If a source does not answer a question, the agent creates a persistent pending request and continues the current conversation. The provider may later reply with text, files, or links; the agent checks which authorized pending questions the new context answers and follows up with those original requesters. An unsatisfactory answer can be escalated in the same way.
 - Importing and refreshing sources uses bounded background jobs rather than scanning large archives or repositories during a single chat request. Only approved or publicly accessible material should be retrieved; files are treated as data, not executable instructions.
 
 The system should retain source references so responses can be grounded in the information actually retrieved.
@@ -916,8 +955,8 @@ WhatsApp ──┐
 Telegram ──┤
 SMS ───────┤
 Discord ───┤
-Web Chat ──┼──> Messaging Gateway
-Other ─────┘
+Other ─────┼──> Messaging Gateway
+           ┘
                   │
                   ▼
            Conversation Engine
@@ -943,21 +982,10 @@ Other ─────┘
                Azure SQL
 ```
 
-The supported channel adapters include **WhatsApp, Telegram, Discord, and embeddable website chat**. Additional channels can later implement the same gateway interface.
+The currently planned channel adapters are **WhatsApp, Telegram, and Discord**. Additional channels can later implement the same gateway interface.
 
 The internal application works with a normalized message format instead of depending directly on WhatsApp, Telegram, or another messaging platform.
 
-## Embedded Website Chat and Service Discovery
-
-Providers can embed the **same customer-facing agent** directly on their landing pages, product pages, and service pages. Visitors can ask questions without opening a separate chat app or messaging channel.
-
-- The chat can use the current page or product as relevant context while still retrieving from the provider's broader authorized knowledge and catalog.
-- Visitors can describe what they are looking for; the agent can help them **explore and compare published products, services, projects, or offerings** from that provider, based on their needs and interests, and link to relevant pages.
-- Product/service names, prices, availability, and other changing details should come from the provider's current supplied catalog or connected sources, not model invention. This is conversational discovery, not an additional commerce or checkout system.
-- Anonymous visitors may access only information explicitly published for public consumption. Personal records, appointment changes, and protected provider operations continue to require appropriate verified identity and authorization.
-- The embedded channel reuses the existing tenant-scoped gateway, AI, knowledge, and scheduling workflows rather than creating a separate agent implementation.
-
-Website integration is distinct from the separately restricted **hosted demonstration instance**: providers may place customer-facing chat on their own sites, while our shared demonstration environment remains access-controlled.
 
 ---
 
@@ -1318,43 +1346,45 @@ Examples include:
 - Provider broadcasts.
 - Schedule-change notifications.
 - Routine follow-up reminders.
-- Provider-question escalation.
-- Returning provider answers to customers.
-- Generating embeddings.
-- Updating vector knowledge.
+- Provider-question escalation and customer-requested clarification.
+- Matching newly supplied context to unresolved pending questions.
+- Returning provider answers to the original customer conversations.
+- Generating embeddings and updating vector knowledge.
 - Retrying failed outbound messages.
 - Scheduled maintenance.
 
-For example:
+A pending question is persisted independently of conversation execution so other messages remain processable.
 
 ```text
-Customer Question
-       │
-       ▼
-Knowledge Search
-       │
-       ▼
-No Reliable Answer
-       │
-       ▼
-ProviderQuestionCreated
-       │
-       ▼
-Provider Receives Question
-
-        ...later...
-
-Provider Reply
-       │
-       ├────> Reply to Customer
-       │
-       └────> Store Operational Knowledge
-                       │
-                       ▼
-                Generate Embedding
-                       │
-                       ▼
-                   Azure SQL
+Unanswered or disputed question
+           │
+           ▼
+Persist PendingQuestion
+           │
+      ┌────┴──────────────┐
+      ▼                   ▼
+Provider notified    Customer told a
+asynchronously       follow-up is pending
+      │                   │
+Provider replies     Customer continues
+later                using the agent
+      │
+      ▼
+Store/validate new context
+      │
+      ▼
+Find related OPEN questions
+within authorized scope
+      │
+      ▼
+Send answers asynchronously
+to original customer channels
+      │
+      ▼
+Mark answered questions resolved
+      │
+      ▼
+Generate embeddings as needed
 ```
 
 ---
@@ -1716,39 +1746,35 @@ At no point should the AI become the authority for:
 
 # Provider-Answer Lifecycle
 
-When the system needs information from the provider:
+Both missing information and customer dissatisfaction produce independent pending questions.
 
 ```text
-Customer asks question
-        ↓
-Authorized knowledge search
-        ↓
-No suitable answer found
-        ↓
-Create provider question
-        ↓
-Provider receives question
-        ↓
-Provider answers
-        ↓
-Classify answer scope
-        │
-        ├── Generic
-        │      ↓
-        │ Provider-level knowledge
-        │
-        └── Customer-specific
-               ↓
-          Customer-scoped knowledge
-        ↓
-Generate embedding
-        ↓
-Store text + vector + metadata
-        ↓
-Reply to waiting customer
+Customer question / clarification
+             ↓
+Persist pending request
+             ↓
+Acknowledge customer and continue conversation
+             ↓
+Provider receives request asynchronously
+             ↓
+Provider supplies text/files/links later
+             ↓
+Store and scope new information
+             ↓
+Find relevant unresolved requests
+             ↓
+Check each against authorization and answer quality
+             ↓
+Reply to each original requester via their channel
+             ↓
+Resolve answered requests; leave others pending
+             ↓
+Embed reusable knowledge asynchronously
 ```
 
-This is one of the core capabilities differentiating the product from a traditional support chatbot.
+Each pending record keeps enough context to identify the original question, customer, provider, and destination conversation. A single provider response may resolve several related questions, but unrelated questions must remain open.
+
+The agent does not have to wait for provider response before accepting further input from any user. This non-blocking follow-up is a core capability, not an industry-specific behavior.
 
 ---
 
@@ -1972,7 +1998,9 @@ The first meaningful version should focus on the core front-desk workflow.
 
 - Text, document, ZIP, URL, and public-repository sources.
 - Source ingestion and retrieval of current external information when needed.
-- Provider question escalation.
+- Non-blocking provider escalation for missing or unsatisfactory answers.
+- Durable pending-question tracking and asynchronous follow-up to original channels.
+- Matching new provider context to relevant unresolved questions.
 - Generic provider knowledge.
 - Customer-specific knowledge.
 - Embedding generation.
@@ -1998,7 +2026,6 @@ The first meaningful version should focus on the core front-desk workflow.
 - Telegram.
 - WhatsApp.
 - Discord.
-- Embeddable website chat for landing/product/service pages.
 
 ## AI
 
@@ -2011,7 +2038,8 @@ The first meaningful version should focus on the core front-desk workflow.
 - Natural-language intent understanding.
 - Clarification questions.
 - Authorized context retrieval.
-- Provider escalation.
+- Provider escalation without blocking ongoing conversations.
+- Customer-requested clarification of unsatisfactory answers.
 
 ## Database
 
@@ -2128,7 +2156,7 @@ Self-hosting provides complete deployment isolation when an organization wants t
     Time-based workflows use timer-triggered functions rather than continuously running schedulers.
 
 12. **Channel independence**  
-    Telegram, WhatsApp, Discord, and embeddable website chat are adapters around a common messaging interface.
+    Telegram, WhatsApp, and Discord are adapters around a common messaging interface.
 
 13. **Provider/customer separation**  
     Providers control availability; customers control their appointments within that availability.
@@ -2186,14 +2214,14 @@ These are **two applications of the same general-purpose front desk**, not separ
 
 **Interfaces**
 
-- **Patient-facing:** Patients message the clinic through WhatsApp or Telegram, or ask questions directly using chat embedded on the clinic's landing or service pages, without needing a separate messaging app.
+- **Patient-facing:** Patients message the clinic through WhatsApp or Telegram to ask questions and manage appointments. **Future option:** embed customer chat on the clinic's landing or service pages.
 - **Provider-facing:** Authorized clinic staff use their chat interface to update availability, supply operational information, answer escalated questions, and request announcements.
 
 **Example workflow**
 
 1. **Add operational context.** Staff tell the agent: "We're hosting a patient orientation event next Saturday at 3 PM in Hall B," or provide details of a time-limited service offer. The agent stores the announcement with its resolved date, location, conditions, and validity period, along with any supporting documents or links.
-2. **Answer customer questions.** A patient asks on the clinic's service page or messaging channel about the venue, event timing, available services, offer eligibility, opening hours, or appointment availability. The agent answers using current authorized context. Once an event has passed or an offer has expired, it explains that it is no longer current rather than promoting the old announcement.
-3. **Escalate and learn.** If the patient asks something not covered by the stored information, the agent contacts authorized clinic staff. They reply through their provider-facing chat, optionally attaching a file or link. The agent returns the answer to the original patient and stores it with the correct knowledge scope for later use.
+2. **Answer customer questions.** A patient asks through the clinic's messaging channel about the venue, event timing, available services, offer eligibility, opening hours, or appointment availability. The agent answers using current authorized context. Once an event has passed or an offer has expired, it explains that it is no longer current rather than promoting the old announcement.
+3. **Escalate without blocking.** If the information is missing, or the patient finds an answer unsatisfactory, the agent records a pending question, says it will check with staff, and continues answering other patient requests. Staff later clarify through their provider-facing chat, optionally attaching a file or link. The agent returns the clarification to the original patient and checks whether it also resolves other related pending questions, while preserving customer-specific access boundaries.
 4. **Notify when instructed.** Staff can ask the agent to announce the event, offer, or changed schedule to an appropriate set of patients. The announcement is sent through the configured messaging channels rather than being broadcast automatically whenever context changes.
 5. **Coordinate appointments.** Patients book, cancel, or reschedule within staff-defined availability. If availability changes, affected patients are notified and offered valid replacement slots.
 6. **Send timed reminders.** The agent sends appointment confirmations, configurable reminders, attendance requests, and provider-specified follow-up reminders.
@@ -2204,15 +2232,15 @@ These are **two applications of the same general-purpose front desk**, not separ
 
 **Interfaces**
 
-- **Contributor-facing:** Contributors interact with the agent through a **Discord bot** in supported channels or conversations, or directly through chat embedded on the organization's website and project pages.
+- **Contributor-facing:** Contributors interact with the agent through a **Discord bot** in supported channels or conversations. **Future option:** embed the agent on the organization's website or project pages.
 - **Maintainer-facing:** Authorized maintainers use the **provider-facing interface** (such as a protected bot conversation or admin chat) to provide context, manage their availability, answer escalations, and request announcements. They are the service providers in this example.
 
 **Example workflow**
 
 1. **Connect sources.** Maintainers give the agent general organization instructions, documentation, uploaded ZIP archives, and links to public GitHub repositories. The system indexes useful source content and can fetch current public issues, pull requests, workflow runs, and available action logs when a question needs fresh information.
-2. **Answer contributor questions and guide discovery.** A contributor asks through Discord or the organization's website how to set up a project, why a PR is failing, where to find a policy, or what events are coming up. A website visitor can also describe their interests and ask which of the organization's published projects or offerings are relevant. The agent retrieves the relevant authorized documentation or live repository information and responds through the contributor-facing Discord interface.
-3. **Escalate unknown questions.** If the answer is missing or unreliable, the agent creates a pending question and contacts the appropriate maintainer through the **maintainer-facing interface**, without sending the contributor into a separate support system.
-4. **Learn and return to the contributor.** The maintainer supplies an explanation, a file, a ZIP archive, or a link. The agent uses it to answer the **original contributor** in their Discord conversation and stores appropriately scoped, source-linked context so similar future questions can be answered without repeated escalation.
+2. **Answer contributor questions and guide discovery.** A contributor asks through Discord how to set up a project, why a PR is failing, where to find a policy, what events are coming up, or which published projects match their interests. The agent retrieves relevant authorized documentation or live repository information and responds through Discord. A future website integration could offer the same project-discovery experience.
+3. **Escalate and keep chatting.** If the answer is unavailable or the contributor considers it unsatisfactory, the agent acknowledges the pending follow-up, records the question, and asks an authorized maintainer via the **maintainer-facing interface**. The contributor can continue asking other questions or scheduling meetings without waiting.
+4. **Learn and follow up asynchronously.** The maintainer later supplies an explanation, file, ZIP archive, or link. The agent stores appropriately scoped knowledge, identifies which outstanding questions can now be answered, and replies to each original contributor in Discord. Questions not addressed remain pending.
 5. **Manage events and announcements.** A maintainer says: "We have a contributor onboarding session one week from now at 6 PM," adds a venue or meeting link, and optionally asks the agent to notify the relevant audience. The date is resolved when the context is added. Subsequent questions receive the correct upcoming, current, cancelled, or past-event status.
 6. **Coordinate meetings.** Contributors request time with a maintainer or mentor through Discord. The agent shows valid availability, handles booking/rescheduling, and notifies both parties of changes.
 7. **Send reminders.** Scheduled notifications can remind the contributor and maintainer **10 or 20 minutes before their meeting**, according to the configured reminder rules.
