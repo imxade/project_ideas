@@ -953,10 +953,9 @@ Conceptually:
 ```text
 WhatsApp ──┐
 Telegram ──┤
+Discord ───┼──> Messaging Gateway
 SMS ───────┤
-Discord ───┤
-Other ─────┼──> Messaging Gateway
-           ┘
+Other ─────┘
                   │
                   ▼
            Conversation Engine
