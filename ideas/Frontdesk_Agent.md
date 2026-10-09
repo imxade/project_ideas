@@ -2245,3 +2245,26 @@ These are **two applications of the same general-purpose front desk**, not separ
 7. **Send reminders.** Scheduled notifications can remind the contributor and maintainer **10 or 20 minutes before their meeting**, according to the configured reminder rules.
 
 **Shared behavior:** The Discord bot is the consumer-facing front desk; maintainer conversations are the provider-facing side of the **same agent and underlying scheduling, knowledge, escalation, and notification system**.
+
+---
+
+# Future Extension: Social Marketing Agent
+
+A separate, optional **Social Marketing Agent** may be built **on top of AI Front Desk**. It would help service providers promote their products and projects through relevant public conversations, while reusing Frontdesk's existing product context, knowledge retrieval, and provider escalation instead of maintaining an independent knowledge base.
+
+## Proposed Workflow
+
+1. **Connect projects and accounts.** The service provider chooses the products/projects to represent, supplies or reuses their Frontdesk context, and authorizes supported social accounts (for example, X/Twitter and Reddit).
+2. **Discover relevant conversations.** The marketing agent periodically searches permitted public posts and comments for questions or discussions genuinely related to those products or the problems they solve.
+3. **Filter before engaging.** Check relevance, platform/community rules, prior interactions, and duplicate post/comment identifiers. Do not repeatedly respond to the same content or insert unrelated promotions.
+4. **Prepare grounded responses.** Request authorized **public product/project information** from Frontdesk and draft a reply based on that information. Initially, publishing discovered-post replies should require provider review/approval and comply with the social platform's API and automation rules.
+5. **Handle follow-ups.** Track replies to permitted published comments. When a new response remains within the product-related scope, reuse a previously verified Frontdesk answer directly where appropriate, without an unnecessary additional generation call. If new reasoning or wording is needed, use the AI layer only as required.
+6. **Escalate missing context.** If Frontdesk cannot answer, use its existing non-blocking provider-question workflow. Once the provider supplies the clarification, the marketing agent can prepare or send the follow-up where authorized and permitted.
+
+## Boundaries
+
+- Social discovery, interaction tracking, approval, and posting belong to the **Social Marketing Agent**; Frontdesk remains responsible for knowledge, authorized answers, and provider escalation.
+- Only information explicitly suitable for public disclosure may be used. Customer-specific records and private conversations must never enter social replies.
+- Automated posting and replies must respect each platform's permissions, anti-spam policies, rate limits, and community rules. Discovering a relevant post does **not** automatically authorize a promotional reply.
+- Keep a minimal record of platform, account, post/comment, conversation, and reply status to prevent duplicate engagements.
+- This is a **future extension**, not part of the Frontdesk MVP or a requirement for its initial hosted demonstration.
