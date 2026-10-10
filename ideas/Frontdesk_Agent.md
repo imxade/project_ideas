@@ -1159,18 +1159,18 @@ The backend decides whether that operation is valid and authorized.
 
 The hosted SaaS should use a **serverless, event-driven architecture**.
 
-A permanently running conversational application server should not be required.
+A permanently running conversational application server should not be required. However, channel-specific adapters may run persistently when their protocols require it, such as maintaining a Discord Gateway WebSocket connection. These adapters should forward messages to the shared backend rather than host the full conversational application.
 
 Azure Functions will perform bounded backend executions.
 
-Incoming messages become events.
+Incoming messages become events. Depending on the channel, they may arrive through a webhook or through a persistent adapter.
 
 A simplified flow is:
 
 ```text
 Incoming Message
       ↓
-Channel Webhook
+Channel Adapter (Webhook or Gateway)
       ↓
 Azure Function
       ↓
@@ -1199,7 +1199,7 @@ Outbound Notification
 
 Each incoming request should remain bounded.
 
-Long-running workflows should be decomposed into independent events.
+Long-running workflows should use durable, resumable state and be decomposed into independent events and bounded executions. Pending work must survive request completion, retries, and process restarts. Durable orchestration, queue-backed processing, or database-backed jobs can provide this capability without requiring the core application server to remain active.
 
 ---
 
@@ -1472,7 +1472,7 @@ The architecture should remain:
 - Event-driven.
 - Cost-conscious.
 - Horizontally distributable.
-- Independent of continuously running backend processes wherever practical.
+- No always-on conversational backend is required, while persistent channel adapters and durable workflow services are permitted where needed.
 
 Azure is a supported deployment target rather than a mandatory runtime dependency for the product.
 
@@ -1496,6 +1496,7 @@ The abstraction should allow equivalent local implementations of:
 
 - Serverless/function execution.
 - Timed jobs.
+- Durable asynchronous workflow execution, using equivalent supported mechanisms where necessary.
 - Relational storage.
 - Vector retrieval.
 - Event processing.
@@ -2109,7 +2110,7 @@ The initial hosted system does **not** require:
 - Semantic deduplication of unresolved provider questions.
 - Arbitrary AI-generated SQL.
 - AI-based authorization.
-- Long-running persistent bot workers.
+Persistent channel adapters may be required by messaging protocols, and durable background execution may be needed for asynchronous or multi-step work. These components do not require the entire application to run as one continuously active process.
 
 The default rule is:
 
@@ -2149,13 +2150,13 @@ Self-hosting provides complete deployment isolation when an organization wants t
    Interactive and asynchronous work is decomposed into short, bounded executions.
 
 10. **Event-driven workflows**  
-    Long-running operations are represented as events rather than persistent processes.
+    Long-running operations use durable workflow state, events, and bounded executions rather than relying on a single process to remain active.
 
 11. **Scheduled serverless execution**  
     Time-based workflows use timer-triggered functions rather than continuously running schedulers.
 
 12. **Channel independence**  
-    Telegram, WhatsApp, and Discord are adapters around a common messaging interface.
+    Telegram, WhatsApp, and Discord are adapters around a common messaging interface. Adapters may use webhooks or persistent connections according to each platform's protocol.
 
 13. **Provider/customer separation**  
     Providers control availability; customers control their appointments within that availability.
