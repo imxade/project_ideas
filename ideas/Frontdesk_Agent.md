@@ -2248,6 +2248,31 @@ These are **two applications of the same general-purpose front desk**, not separ
 
 ---
 
+# Scheduling & Reservation Management
+
+AI Front Desk provides a general-purpose scheduling and reservation management capability for coordinating people, time slots, sessions, and resources across different service domains.
+
+The system supports provider availability management, appointment and meeting scheduling, rescheduling, and notifications. The same underlying capability can be extended to modify existing reservations involving a defined time period or resource, subject to availability, provider rules, and the capabilities of the connected system.
+
+## Example Use Cases
+
+| Domain | Example operations |
+|---|---|
+| Appointments and consultations | Schedule appointments and move them to another available time slot |
+| Meetings and mentorship | Schedule meetings, reschedule them, and notify participants |
+| Classes and workshops | Manage session schedules and move participants to sessions with available capacity |
+| Hotels and accommodation | Change reservation dates when suitable rooms are available |
+| Vehicle and equipment rentals | Modify rental periods based on resource availability |
+| Venues and meeting rooms | Reschedule reservations or move them to another available space |
+| Tours and experiences | Change reserved dates, times, or sessions where permitted |
+| Other scheduled services | Adapt scheduling and reservation changes to provider-defined rules |
+
+Initially, the generalized extension focuses on **rescheduling or modifying existing reservations**, while retaining the appointment and meeting workflows already defined. New reservation creation, cancellations, and more complex modifications can be introduced incrementally.
+
+All changes must respect authorization, availability, applicable conditions, and the connected system's capabilities. The original reservation should remain unchanged if a requested modification cannot be completed successfully.
+
+---
+
 # Future Extension: Social Marketing Agent
 
 A separate, optional **Social Marketing Agent** may be built **on top of AI Front Desk**. It would help service providers promote their products and projects through relevant public conversations, while reusing Frontdesk's existing product context, knowledge retrieval, and provider escalation instead of maintaining an independent knowledge base.
