@@ -1819,15 +1819,15 @@ The agent does not have to wait for provider response before accepting further i
 # Scheduled Job Lifecycle
 
 ```text
-1. Timer-triggered Azure Function executes
+1. Containerized scheduler/dispatcher runs
         ↓
 2. Query Azure SQL for due jobs
         ↓
 3. Claim/mark work for processing
         ↓
-4. Emit one event per operation
+4. Enqueue one job per operation
         ↓
-5. Independent Function handles event
+5. Independent containerized worker handles each job
         ↓
 6. Perform deterministic action
         ↓
@@ -1898,9 +1898,9 @@ For example, if booking succeeds but response generation fails, retrying the req
 
 State-changing operations should therefore carry an idempotency/operation identifier where appropriate.
 
-## Timed Functions Are Scanners
+## Scheduled Work Discovery
 
-Timer-triggered functions should discover durable due work rather than represent the work themselves.
+The scheduler/dispatcher should discover durable due work and enqueue it rather than perform the downstream work itself.
 
 A scheduled record may contain:
 
@@ -2055,7 +2055,7 @@ The first meaningful version should focus on the core front-desk workflow.
 - Provider schedule-change notifications.
 - Rescheduling workflows.
 - Routine follow-ups.
-- Timer-triggered scheduled jobs.
+- Persisted scheduled-job dispatch.
 - Provider broadcasts.
 - Retry processing.
 
