@@ -2227,7 +2227,7 @@ These are **two applications of the same general-purpose front desk**, not separ
 
 **Boundary:** This workflow handles front-desk operations and service information, **not medical records, diagnosis, or clinical advice**.
 
-## 2. Open-Source Organization Front Desk (Discord)
+## 2. Organization Front Desk (Discord)
 
 **Interfaces**
 
