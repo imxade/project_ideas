@@ -312,7 +312,7 @@ The normal hosted deployment should use:
 ```text
 One shared frontend
         +
-One shared serverless application
+One shared containerized application runtime
         +
 One shared Azure SQL database
         +
@@ -1155,15 +1155,16 @@ The backend decides whether that operation is valid and authorized.
 
 ---
 
-# Serverless Architecture
 
-The hosted SaaS should use a **serverless, event-driven architecture**.
+# Container-First Runtime and Event-Driven Architecture
 
-A permanently running conversational application server should not be required. However, channel-specific adapters may run persistently when their protocols require it, such as maintaining a Discord Gateway WebSocket connection. These adapters should forward messages to the shared backend rather than host the full conversational application.
+The initial hosted SaaS should use a **container-first, event-driven architecture** to keep runtime behavior as consistent as practical across local development, floci-az, and Azure. Azure Container Apps is the preferred hosted runtime for containerized components, with Docker providing a common packaging model.
 
-Azure Functions will perform bounded backend executions.
+The Next.js frontend, backend API, channel adapters, and background workers can be deployed as separate containers according to scaling and protocol needs. They share application contracts and infrastructure abstractions rather than requiring one monolithic process.
 
-Incoming messages become events. Depending on the channel, they may arrive through a webhook or through a persistent adapter.
+Persistent channel adapters are allowed where a protocol requires them, such as maintaining a Discord Gateway WebSocket connection. Webhook-based channels can deliver messages to API endpoints. Some adapters or workers may need active replicas, but not every application component needs to run continuously.
+
+Incoming messages become events. Depending on the channel, they arrive through a webhook or a persistent adapter.
 
 A simplified flow is:
 
@@ -1172,7 +1173,7 @@ Incoming Message
       ↓
 Channel Adapter (Webhook or Gateway)
       ↓
-Azure Function
+Containerized API / Message Handler
       ↓
 Normalize Message
       ↓
@@ -1192,20 +1193,25 @@ Deterministic Application Service
       ↓
 Prisma / Azure SQL
       ↓
-Database Event
+Persisted Event / Queue
+      ↓
+Containerized Worker
       ↓
 Outbound Notification
 ```
 
-Each incoming request should remain bounded.
+Each incoming request and worker job should remain bounded.
 
-Long-running workflows should use durable, resumable state and be decomposed into independent events and bounded executions. Pending work must survive request completion, retries, and process restarts. Durable orchestration, queue-backed processing, or database-backed jobs can provide this capability without requiring the core application server to remain active.
+Long-running workflows must use durable, resumable state and be decomposed into independent events, queued jobs, and bounded executions. Pending work must survive request completion, retries, and process restarts. The initial design should use Azure SQL for durable job/workflow state and Azure Queue Storage or Service Bus for queued delivery, selecting only the features validated in floci-az. A queue is a delivery mechanism, not a complete workflow orchestrator; workflow state, idempotency, retries, scheduling, and recovery must be designed explicitly.
+
+Persistent adapters and workers are permitted where needed. The architecture does not require the entire application to run as one continuously active process.
 
 ---
 
+
 # Event-Driven Workflows
 
-For example, notifying 500 customers should not require a single function to remain active while all messages are delivered.
+For example, notifying 500 customers should not require one process execution to remain active until every message has been delivered.
 
 Instead:
 
@@ -1216,21 +1222,23 @@ ScheduleChanged Event
         ↓
 Find affected appointments
         ↓
-One notification event
+Enqueue one notification job
 per affected customer
         ↓
-Independent executions
+Independent containerized workers
+process bounded jobs
 ```
 
-This keeps function execution short and makes workflows resilient to serverless execution limits.
+This supports horizontal scaling, retries, and recovery without tying an entire workflow to one long-running execution.
 
 ---
 
+
 # Scheduled Jobs
 
-Scheduled and time-dependent workflows will use **timer-triggered Azure Functions** for Azure-hosted deployments.
+Scheduled and time-dependent workflows should use persisted due-work records, a scheduler/dispatcher, and queue-driven workers. The initial implementation should favor a containerized scheduler/worker that can run the same code locally and in Azure, using only scheduling and messaging features validated through floci-az.
 
-No continuously running scheduler is required.
+Azure SQL stores due times and job state. The scheduler/dispatcher periodically discovers due work and enqueues bounded jobs. It must tolerate restarts and repeated scans, and use safe claiming or idempotency controls to prevent duplicate effects.
 
 Examples include:
 
@@ -1244,24 +1252,23 @@ Examples include:
 - Cleanup tasks.
 - Expiration/deactivation of temporary operational knowledge.
 
-A timer-triggered function can periodically query Azure SQL for due work.
+A simplified flow is:
 
 ```text
-Timer Trigger
+Containerized Scheduler / Dispatcher
       ↓
-Azure Function
+Query Azure SQL for due jobs
       ↓
-Query Azure SQL
-for due jobs
+Enqueue due events/jobs
       ↓
-Create events
-      ↓
-Independent processing
+Independent containerized workers
+process the work
 ```
 
-The timer function should generally discover and dispatch work rather than performing every downstream operation itself.
+The scheduler/dispatcher should discover and dispatch work rather than perform every downstream operation itself. A future orchestration service may replace or complement this approach if it can be validated through floci-az.
 
 ---
+
 
 # Appointment Reminder Example
 
@@ -1275,23 +1282,23 @@ Appointment
 └── reminder_status
 ```
 
-A timer-triggered function detects:
+A scheduler/dispatcher detects due reminders by querying persisted state:
 
 ```text
 reminder_time <= current_time
 AND reminder_status = pending
 ```
 
-and emits the appropriate notification event.
+It enqueues the appropriate notification job.
 
 ```text
-Timer Function
+Scheduler / Dispatcher
       ↓
 Find Due Reminders
       ↓
-ReminderDue Event
+ReminderDue Job in Queue
       ↓
-Messaging Function
+Containerized Messaging Worker
       ↓
 Configured Messaging Channel
       ↓
@@ -1299,6 +1306,7 @@ Update Azure SQL
 ```
 
 ---
+
 
 # Routine Follow-Up Example
 
@@ -1318,11 +1326,13 @@ FollowUp
 When the date arrives:
 
 ```text
-Timer Trigger
+Scheduler / Dispatcher
       ↓
 Find Due Follow-Ups
       ↓
-FollowUpDue Event
+FollowUpDue Job in Queue
+      ↓
+Containerized Worker
       ↓
 Customer Notification
       ↓
@@ -1388,6 +1398,7 @@ Generate embeddings as needed
 
 ---
 
+
 # Infrastructure Direction
 
 Primary stack:
@@ -1397,19 +1408,17 @@ Primary stack:
 - AI SDK.
 - Prisma.
 - Flask/Python services where appropriate.
-- Docker.
-- Terraform.
-- floci-az.
-- Azure.
-- Azure Functions.
-- Timer-triggered Azure Functions.
-- Azure SQL.
-- Azure SQL vector search.
-- Event-driven/serverless services.
+- Docker and containerized application services.
+- Azure Container Apps for hosted container runtime.
+- Azure Queue Storage or Service Bus for event/job delivery, selected according to verified floci-az support.
+- Azure SQL and Azure SQL vector search.
+- Terraform where applicable.
+- floci-az for local development, validation, and self-hosted operation.
+- Event-driven processing with durable workflow/job state.
 
 Infrastructure should be reproducible using Terraform wherever applicable.
 
-The application must remain sufficiently decoupled from Azure that the same core product can operate in Azure or through a local/self-hosted environment.
+The same container images should run locally and in Azure wherever practical. The application must remain sufficiently decoupled from Azure-specific services that the same core product can operate in Azure or through a local/self-hosted environment.
 
 ---
 
@@ -1451,32 +1460,34 @@ The application should be capable of operating against either environment with m
 
 ---
 
+
 # Azure Deployment
 
-The Azure-hosted architecture will include:
+The Azure-hosted architecture will use:
 
-- Azure Functions for serverless execution.
-- Timer-triggered Azure Functions for scheduled jobs.
-- Azure SQL for relational data.
+- Azure Container Apps for containerized frontend, API, channel-adapter, and background-worker components as appropriate.
+- Azure SQL for relational data and durable workflow/job state.
 - Azure SQL vector capabilities for operational knowledge.
+- Azure Queue Storage or Azure Service Bus for queued event/job delivery, based on the features validated through floci-az.
 - Prisma for relational application access.
-- Event-driven processing.
+- Event-driven processing and bounded worker jobs.
 - AI SDK for model/provider abstraction.
-- WhatsApp and Telegram integrations.
+- WhatsApp, Telegram, and Discord integrations.
 
-The project will prioritize Azure services with persistent free-tier availability where practical.
+The project will prioritize cost-conscious Azure services where practical while validating the exact service behavior required by the application.
 
 The architecture should remain:
 
-- Serverless.
+- Container-first.
 - Event-driven.
 - Cost-conscious.
-- Horizontally distributable.
-- No always-on conversational backend is required, while persistent channel adapters and durable workflow services are permitted where needed.
+- Horizontally scalable.
+- Able to keep persistent replicas only for components that need them, such as a Discord Gateway adapter or a background worker.
 
 Azure is a supported deployment target rather than a mandatory runtime dependency for the product.
 
 ---
+
 
 # Azure-Independent Operation
 
@@ -1489,19 +1500,33 @@ A service provider or organization may operate the system using:
 - Local/private infrastructure.
 - A compatible relational database.
 - A compatible vector-search implementation.
+- A compatible queue/event-delivery mechanism.
 - A local/private AI endpoint.
 - Their own messaging and networking configuration.
 
 The abstraction should allow equivalent local implementations of:
 
-- Serverless/function execution.
-- Timed jobs.
+- Containerized API, channel-adapter, and worker execution.
+- Queue/event delivery.
+- Timed jobs and scheduled dispatch.
 - Durable asynchronous workflow execution, using equivalent supported mechanisms where necessary.
 - Relational storage.
 - Vector retrieval.
-- Event processing.
 
 without rewriting the higher-level business logic.
+
+---
+
+# Future Infrastructure Exploration
+
+## Azure Static Web Apps and Durable Functions
+
+Azure Static Web Apps (SWA) and Azure Durable Functions are **future exploration candidates, not dependencies of the initial MVP**. Revisit them once floci-az supports the required behavior well enough for local development and end-to-end validation.
+
+- SWA may be evaluated as an optional frontend-hosting approach if it reduces operational complexity without undermining local/Azure parity.
+- Durable Functions may be evaluated as an orchestration option for durable multi-step workflows if the required trigger, orchestration, retry, and replay behavior can be validated through floci-az.
+
+Until then, use containerized application components, Azure SQL-backed workflow/job state, and queue-driven workers. Keep workflow logic behind application-level abstractions so a future scheduling or orchestration implementation can be introduced without rewriting business logic.
 
 ---
 
@@ -1518,7 +1543,7 @@ The default hosted architecture is shared and multi-tenant:
 ```text
 Shared Next.js frontend
         +
-Shared serverless backend
+Shared containerized API and worker services
         +
 Shared Azure SQL database
         +
@@ -1530,10 +1555,10 @@ Ordinary account creation does not provision a new application stack, Azure SQL 
 The hosted version may provide:
 
 - Azure-hosted infrastructure.
-- Azure Functions.
-- Azure SQL.
-- Vector-backed operational knowledge.
-- Scheduled functions.
+- Azure Container Apps for containerized application services.
+- Azure SQL and vector-backed operational knowledge.
+- Queue-backed event delivery and containerized background workers.
+- Durable scheduled-job state and dispatch.
 - Messaging integrations.
 - Platform-managed AI access.
 - AI SDK integrations.
@@ -1564,6 +1589,7 @@ A self-hosted installation should not inherently require Azure.
 
 ---
 
+
 # Deployment and AI Independence
 
 Infrastructure and AI-provider choices should be independent.
@@ -1572,31 +1598,36 @@ Examples:
 
 ```text
 Azure Deployment
++ Azure Container Apps
 + Azure SQL
-+ Azure Functions
++ Queue / Worker Services
 + Platform AI
 ```
 
 ```text
 Azure Deployment
++ Azure Container Apps
 + Azure SQL
-+ Azure Functions
++ Queue / Worker Services
 + Provider's AI API
 ```
 
 ```text
 Azure Deployment
++ Azure Container Apps
 + Azure SQL
 + Private AI Endpoint
 ```
 
 ```text
 floci-az / Self-Hosted
++ Containerized Application
 + External AI API
 ```
 
 ```text
 floci-az / Self-Hosted
++ Containerized Application
 + Local AI Model
 ```
 
@@ -1605,12 +1636,15 @@ Conceptually:
 ```text
 Infrastructure
 ├── Azure
-│   ├── Azure Functions
-│   ├── Timer Functions
+│   ├── Azure Container Apps
+│   ├── Queue Storage / Service Bus
 │   ├── Azure SQL
 │   └── Vector Search
 │
 └── Local / Self-Hosted / floci-az
+    ├── Docker Containers
+    ├── Compatible Queue / Event Delivery
+    └── Compatible Storage
 
 AI
 ├── Platform Model
@@ -1621,6 +1655,7 @@ AI
 Neither choice should unnecessarily constrain the other.
 
 ---
+
 
 # High-Level Architecture
 
@@ -1685,7 +1720,10 @@ Neither choice should unnecessarily constrain the other.
              Events                  Scheduled Jobs
                 │                           │
                 ▼                           ▼
-         Azure Functions             Timer Functions
+       Queue / Event Bus          Scheduler / Dispatcher
+                │                           │
+                ▼                           ▼
+       Containerized Workers      Azure SQL Job State
 ```
 
 ---
@@ -1900,7 +1938,7 @@ Independent delivery attempt
 
 A messaging outage therefore does not corrupt appointment state.
 
-Large broadcasts should similarly be split into bounded per-recipient work rather than one long-running function execution.
+Large broadcasts should similarly be split into bounded per-recipient worker jobs rather than one long-running execution.
 
 ## High-Impact Provider Actions
 
@@ -2052,17 +2090,18 @@ The first meaningful version should focus on the core front-desk workflow.
 
 ## Infrastructure
 
-- Azure Functions.
-- Timer-triggered Azure Functions.
-- Azure SQL.
+- Azure Container Apps for hosted containerized services.
+- Containerized frontend, API, channel adapters, and background workers.
+- Azure Queue Storage or Service Bus for queued event/job delivery, subject to verified floci-az support.
+- Azure SQL for operational and durable workflow/job state.
 - Azure SQL vector search.
 - Prisma.
 - AI SDK.
 - Azure deployment support.
-- floci-az validation.
-- floci-az local/self-hosted operation.
+- floci-az validation and local/self-hosted operation.
 - Docker.
 - Terraform where applicable.
+- No mandatory Azure Functions, SWA, or Durable Functions dependency for the initial implementation.
 - No mandatory Azure dependency for self-hosting.
 
 ---
@@ -2098,6 +2137,7 @@ The application backend remains the authority for permissions and state.
 
 ---
 
+
 # Architecture Decisions Explicitly Kept Simple
 
 The initial hosted system does **not** require:
@@ -2110,7 +2150,9 @@ The initial hosted system does **not** require:
 - Semantic deduplication of unresolved provider questions.
 - Arbitrary AI-generated SQL.
 - AI-based authorization.
-Persistent channel adapters may be required by messaging protocols, and durable background execution may be needed for asynchronous or multi-step work. These components do not require the entire application to run as one continuously active process.
+- Azure Static Web Apps or Azure Durable Functions as mandatory dependencies.
+
+The initial runtime is container-first rather than Functions-first. The frontend, API, adapters, and workers may be deployed separately as containers. Persistent channel adapters and some workers may need active replicas, but ordinary requests and background tasks should remain independently deployable and bounded. Durable work must be tracked in persistent state and dispatched reliably; queues alone do not replace explicit workflow state, idempotency, retry, and recovery logic.
 
 The default rule is:
 
@@ -2119,6 +2161,7 @@ The default rule is:
 Self-hosting provides complete deployment isolation when an organization wants to run its own application environment.
 
 ---
+
 
 # Architectural Principles
 
@@ -2138,7 +2181,7 @@ Self-hosting provides complete deployment isolation when an organization wants t
    AI SDK separates application logic from the underlying model/provider.
 
 6. **Infrastructure independence**  
-   Azure is a supported hosted target while floci-az enables local and self-hosted operation.
+   Azure is a supported hosted target while floci-az and compatible local services enable local and self-hosted operation.
 
 7. **Database abstraction**  
    Prisma provides the primary relational data-access layer.
@@ -2146,14 +2189,14 @@ Self-hosting provides complete deployment isolation when an organization wants t
 8. **Vector abstraction**  
    Azure SQL vector-specific operations remain isolated behind a knowledge repository rather than leaking database-specific code throughout the application.
 
-9. **Serverless execution**  
-   Interactive and asynchronous work is decomposed into short, bounded executions.
+9. **Container-first runtime and bounded execution**  
+   Containerized services maximize local/Azure runtime parity. Requests and worker jobs remain bounded even when adapters or workers need persistent processes.
 
 10. **Event-driven workflows**  
     Long-running operations use durable workflow state, events, and bounded executions rather than relying on a single process to remain active.
 
-11. **Scheduled serverless execution**  
-    Time-based workflows use timer-triggered functions rather than continuously running schedulers.
+11. **Durable scheduled work**  
+    Due work is persisted and dispatched to workers. The initial implementation uses scheduling and queue mechanisms validated through floci-az rather than depending on Azure Durable Functions.
 
 12. **Channel independence**  
     Telegram, WhatsApp, and Discord are adapters around a common messaging interface. Adapters may use webhooks or persistent connections according to each platform's protocol.
@@ -2198,7 +2241,7 @@ Azure SQL provides both relational operational state and vector-backed semantic 
 
 AI SDK prevents the application's conversational layer from becoming tightly coupled to one model vendor and allows hosted, customer-provided, private, or local model configurations.
 
-Timer-triggered serverless functions handle scheduled work without requiring continuously running workers.
+A containerized scheduler/dispatcher and queue-driven workers handle scheduled work and retries, with durable job state stored in Azure SQL.
 
 floci-az allows the architecture to be validated, operated, and self-hosted independently of Azure.
 
