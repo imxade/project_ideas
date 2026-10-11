@@ -383,19 +383,19 @@ It must never be visible to another tenant.
 
 ---
 
-# Generic Provider Knowledge
+# Professional- or Resource-Specific Knowledge
 
-If a provider's response applies generally to customers, it is stored as **provider-level operational knowledge**.
+Knowledge that applies only to one professional, service, location, or resource should be scoped to that specific target. Information that applies across the whole organization belongs in **tenant/account-wide operational knowledge** instead; it should not be duplicated across individual professionals.
 
 For example:
 
 Customer:
 
-> Are you open on Diwali?
+> Does Dr. A offer consultations on Saturdays?
 
-Provider response:
+Provider-facing response:
 
-> Yes, but only from 9 AM until 1 PM.
+> Dr. A offers consultations on Saturdays from 9 AM until noon.
 
 A knowledge record may conceptually contain:
 
@@ -403,7 +403,7 @@ A knowledge record may conceptually contain:
 OperationalKnowledge
 ├── id
 ├── tenant_id
-├── provider_id
+├── provider_id (professional/resource scope, when applicable)
 ├── customer_id = NULL
 ├── scope = PROVIDER
 ├── content
@@ -415,29 +415,9 @@ OperationalKnowledge
 └── source/reference metadata
 ```
 
-Because `customer_id` is absent, the information may be retrieved for other customers interacting with the same provider.
+Because `customer_id` is absent, the information may be retrieved for customers whose current request or booking makes that professional/resource relevant. The system must not assume that every customer conversation belongs to a specific professional.
 
-Semantic retrieval must still remain scoped to the organization and provider.
-
-Conceptually:
-
-```text
-Customer Question
-       ↓
-Generate Query Embedding
-       ↓
-Azure SQL Vector Search
-       ↓
-FILTER tenant_id
-       ↓
-FILTER provider_id
-       ↓
-FILTER customer_id IS NULL
-       ↓
-Closest Relevant Knowledge
-       ↓
-AI Response
-```
+Semantic retrieval must first remain scoped to the organization/account and, when applicable, the relevant professional/resource.
 
 ---
 
@@ -465,7 +445,7 @@ A corresponding record may contain:
 OperationalKnowledge
 ├── id
 ├── tenant_id
-├── provider_id
+├── provider_id (optional; only if tied to a specific professional/resource)
 ├── customer_id
 ├── scope = CUSTOMER
 ├── content
@@ -476,6 +456,8 @@ OperationalKnowledge
 └── source/reference metadata
 ```
 
+Customer-specific knowledge may apply to the customer across the service-provider account, or only in relation to a particular professional/resource. Store that association explicitly rather than inferring it from the customer's conversation history.
+
 The customer association is stored as ordinary relational metadata.
 
 The embedding represents the semantic meaning of the content.
@@ -485,11 +467,22 @@ The system **must not rely on the customer's name being embedded into the vector
 Instead, retrieval must deterministically constrain the query:
 
 ```text
-tenant_id = current_organization
-AND provider_id = current_provider
+tenant_id = current_account
 AND (
-    customer_id IS NULL
-    OR customer_id = current_customer
+    scope = TENANT
+    OR (
+        scope = PROVIDER
+        AND provider_id = current_professional_or_resource_when_relevant
+        AND customer_id IS NULL
+    )
+    OR (
+        scope = CUSTOMER
+        AND customer_id = current_customer
+        AND (
+            provider_id IS NULL
+            OR provider_id = current_professional_or_resource_when_relevant
+        )
+    )
 )
 ```
 
@@ -564,7 +557,7 @@ If two active records at the same scope genuinely conflict and the system cannot
 A provider may retrieve:
 
 - Tenant-wide knowledge available within their tenant.
-- Their own provider-specific operational knowledge.
+- Professional/resource-specific operational knowledge within their authorized scope.
 - Customer-specific knowledge only when the requested operation and authorization allow access to that customer.
 - Pending customer questions addressed to them.
 
@@ -574,7 +567,7 @@ Provider access remains subject to deterministic application authorization.
 
 A response produced because of one customer's escalated question should default to **customer-specific** knowledge unless it is clearly marked as generally applicable.
 
-If the provider indicates that the answer applies to everyone, it may be stored at provider or tenant scope.
+If the provider indicates that the answer applies across the organization/account, store it at tenant/account scope. Use professional/resource scope only when the answer genuinely differs for that target.
 
 For ambiguous cases, the bot may ask whether the information should be remembered for all customers.
 
