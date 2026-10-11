@@ -2,9 +2,11 @@
 
 ## Product Idea
 
-AI Front Desk is a general-purpose conversational coordination layer between **any service provider** and their **customers or participants**, covering operational questions, knowledge access, booking, meetings, and service coordination.
+AI Front Desk is a general-purpose conversational coordination layer between a **service provider** and their **customers or participants**, covering operational questions, knowledge access, booking, meetings, and service coordination. The service provider may be one individual or an authorized person/team managing a business, organization, chain, or multiple professionals and resources.
 
-Instead of behaving like a traditional customer-support chatbot that only answers FAQs, the system maintains operational context, has controlled access to service records and schedules, asks the service provider for missing information when necessary, and can execute predefined actions such as booking, rescheduling, notifications, reminders, and broadcasts.
+The product has two primary interaction sides: a customer-facing side and a provider-facing side. The same provider-facing workflow manages operational information, schedules, reservations, announcements, and escalated questions whether the service provider is an individual or an organization. Individual professionals or resources are distinguished internally when needed for availability, reservation assignment, authorization, or a customer's explicitly stated preference; they do not each require a separate front-desk conversation or interface.
+
+Instead of behaving like a traditional customer-support chatbot that only answers FAQs, the system maintains operational context, has controlled access to service records and schedules, asks the provider-facing side for missing information when necessary, and can execute predefined actions such as booking, rescheduling, notifications, reminders, and broadcasts.
 
 The same core product is intended to serve different industries and organizations without separate industry-specific implementations. Where used in healthcare, its scope remains **service and scheduling records, not medical records**.
 
@@ -44,16 +46,13 @@ The model never receives arbitrary access to other customers or unrestricted dat
 
 ## Service Provider
 
-A service provider may be an individual professional, team, business, or organization.
+A service provider may be an individual professional or an authorized person/team acting for a business, organization, chain, or group of professionals. The provider-facing side is one operational interface for the service provider and its authorized staff, not a separate front desk for every doctor or employee.
 
 A provider can:
 
-- Define working days.
-- Define working hours.
-- Add or remove availability.
-- Mark themselves unavailable for a period.
-- Ask questions about their service schedule.
-- Request their schedule or appointments conversationally.
+- Define working days and hours for the services, professionals, or resources they are authorized to manage.
+- Add or remove availability and mark relevant professionals or resources unavailable.
+- Ask about and request schedules or appointments across their authorized scope, including a specific professional or resource when needed.
 - Broadcast messages to selected or eligible customers.
 - View numbers marked as spam.
 - Mark a customer/contact as spam.
@@ -63,11 +62,7 @@ A provider can:
 - Answer customer questions escalated by the AI.
 - Provide operational information that can be reused for future customer questions.
 
-A provider **cannot directly reschedule individual customer appointments**.
-
-Instead, the provider modifies their own availability.
-
-If that availability change affects appointments, the system contacts the affected customers and lets them select another available slot.
+The provider-facing side can update availability for the service, professional, or resource it is authorized to manage, but it does not silently move an existing customer reservation. If an availability change affects appointments, the system contacts affected customers and lets them select another valid slot.
 
 ---
 
@@ -134,15 +129,17 @@ Retrieval, authorization, and filtering of the underlying records remain determi
 
 # Scheduling Model
 
-Provider availability and customer bookings are deliberately separated. Bookings may represent appointments, meetings, consultations, or other scheduled services.
+Provider-side availability management and customer bookings are deliberately separated. Bookings may represent appointments, meetings, consultations, or other scheduled services.
 
-The provider controls:
+The provider-facing side controls:
 
-**Availability**
+**Availability for the services, professionals, and resources within its authorized scope**
 
 The customer controls:
 
-**Appointments within that availability**
+**Their own appointments within that availability**
+
+The front desk coordinates between both sides. A specific professional or resource is selected when the booking requires it, not by assuming that every customer conversation belongs to one individual professional.
 
 Example:
 
@@ -283,29 +280,23 @@ The system should retain source references so responses can be grounded in the i
 
 ---
 
-# Tenant and Hosted Isolation Model
+# Internal Account and Data-Isolation Model
 
-The hosted SaaS is **multi-tenant by default**.
+The hosted SaaS is **multi-tenant by default**. A tenant/account is an internal security and data-isolation boundary, not an additional conversational role that customers or providers need to manage explicitly.
 
-The primary isolation boundary is the service organization that signs up for the product.
-
-For example:
+The service-provider side may represent a solo professional or an authorized person/team managing an organization, chain, or multiple professionals. For example:
 
 ```text
-Tenant: Service Organization A
-
-Providers:
-├── Dr. A
-├── Dr. B
-└── Dr. C
-
-Customers:
-├── Customer 1
-├── Customer 2
-└── Customer 3
+Service-provider account
+├── Shared operational information and booking rules
+├── Authorized staff using one provider-facing interface
+├── Professionals or resources (when relevant to schedules/bookings)
+└── Customers and their reservations
 ```
 
-A provider is normally a member of a tenant rather than a separate SaaS deployment.
+The customer-facing and provider-facing sides remain the primary product interaction model. A clinic does not need a separate front-desk conversation or interface for every doctor. Organization-wide information and schedules are managed across the authorized scope; individual professional/resource IDs are used when needed for availability, reservation assignment, permissions, or a customer's explicit preference.
+
+A solo professional may use the same model without a meaningful distinction between organization and individual. The internal data model can still represent an account/tenant boundary for isolation.
 
 The normal hosted deployment should use:
 
@@ -321,17 +312,9 @@ Many isolated tenants
 
 The application should **not** create a separate Azure SQL database, vector database, or complete application instance for every provider or tenant by default.
 
-Isolation is enforced through deterministic relational scope:
+Isolation is enforced through deterministic relational scope. The implementation may use fields such as `tenant_id`, `provider_id`, and `customer_id`, but these are internal authorization and data-scoping identifiers, not a mandatory user-facing hierarchy. A provider/resource identifier is included in a query only when relevant to the operation or knowledge scope.
 
-```text
-tenant_id
-    ↓
-provider_id
-    ↓
-customer_id
-```
-
-The authenticated application context supplies these identifiers. The AI does not choose its tenant or customer scope.
+The authenticated application context supplies the allowed identifiers. The AI does not choose its tenant, provider/resource, or customer scope.
 
 A fully isolated application environment belongs to the **self-hosted deployment model**, not to ordinary SaaS signup.
 
@@ -522,13 +505,15 @@ Operational knowledge retrieval is always scoped before semantic ranking.
 
 ## Customer Request
 
-A customer interacting with a provider may retrieve:
+A customer may retrieve:
 
 ```text
-1. Tenant-wide knowledge for the current tenant
-2. Provider-specific knowledge for the current provider
-3. Customer-specific knowledge for the current customer
+1. Organization/account-wide knowledge for the current service-provider account
+2. Professional- or resource-specific knowledge when that professional/resource is relevant to the current request or booking
+3. Customer-specific knowledge for the verified customer
 ```
+
+A conversation is not automatically assigned to an individual doctor or professional. Use an existing booking or an explicit customer choice when a particular professional/resource matters; otherwise use the shared front-desk intake and booking flow. Do not infer the intended professional from booking history or recent interactions. If a booking requires a choice that is not yet known, ask the customer or follow the provider's normal intake rules.
 
 It must exclude:
 
@@ -2171,8 +2156,8 @@ Self-hosting provides complete deployment isolation when an organization wants t
 2. **Deterministic authorization**  
    Permissions are enforced by application code, not model reasoning.
 
-3. **Tenant isolation**  
-   Tenant, provider, and customer boundaries are represented explicitly in relational data and enforced before data reaches the AI.
+3. **Internal data isolation**  
+   Account/tenant, provider/resource, and customer boundaries are enforced in relational data before records reach the AI. These implementation boundaries support the two primary product sides and do not require a separate user-facing front desk for each professional.
 
 4. **Vector search is retrieval, not authorization**  
    Semantic similarity determines relevance only after deterministic scope filtering.
@@ -2201,8 +2186,8 @@ Self-hosting provides complete deployment isolation when an organization wants t
 12. **Channel independence**  
     Telegram, WhatsApp, and Discord are adapters around a common messaging interface. Adapters may use webhooks or persistent connections according to each platform's protocol.
 
-13. **Provider/customer separation**  
-    Providers control availability; customers control their appointments within that availability.
+13. **Provider-side/customer-side coordination**  
+    The provider-facing side manages availability and operational rules across its authorized scope; customers manage their own bookings within that availability. Individual professionals or resources are assigned only where the booking or authorization requires it.
 
 14. **Minimal healthcare scope**  
     The healthcare implementation manages service operations and scheduling, not medical records or clinical decision-making.
@@ -2235,7 +2220,7 @@ Generic provider answers become reusable provider knowledge.
 
 Customer-specific answers remain associated with that customer and cannot become visible to unrelated customers.
 
-The hosted SaaS shares application and database infrastructure by default while enforcing deterministic tenant, provider, and customer boundaries for both relational and vector retrieval.
+The hosted SaaS shares application and database infrastructure by default while enforcing deterministic internal account, provider/resource, and customer boundaries for relational and vector retrieval. These implementation details support the simple customer-facing/provider-facing product model rather than defining additional conversational roles.
 
 Azure SQL provides both relational operational state and vector-backed semantic retrieval for hosted deployments, while Prisma remains the primary application data-access abstraction.
 
