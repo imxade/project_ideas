@@ -8,6 +8,8 @@ The product has two primary interaction sides: a customer-facing side and a prov
 
 Instead of behaving like a traditional customer-support chatbot that only answers FAQs, the system maintains operational context, has controlled access to service records and schedules, asks the provider-facing side for missing information when necessary, and can execute predefined actions such as booking, rescheduling, notifications, reminders, and broadcasts.
 
+A common customer frustration with bot-only support is getting repetitive answers without a practical way to reach a person, especially for complaints, suspected fraud, urgent incidents, technical support, or other exceptional requests. AI Front Desk should reduce routine support workload, not eliminate human support: it handles well-defined requests automatically while preserving a clear path to a small authorized human team for real responses, judgment, investigation, and action.
+
 The same core product is intended to serve different industries and organizations without separate industry-specific implementations. Where used in healthcare, its scope remains **service and scheduling records, not medical records**.
 
 As a final deliverable, the project will also include a **hosted demonstration instance** operated by us. Access to this instance will be limited to explicitly authorized demo accounts so the complete workflow and practical usage of the product can be shown during pitches, reviews, or demonstrations without exposing the hosted environment as an unrestricted public service.
@@ -224,6 +226,12 @@ For example:
 
 This follows the **same pending-question workflow**, preserving the original question, the answer given, and the customer's clarification or objection. It does not interrupt the rest of the conversation.
 
+## Human Handoff for Urgent, Sensitive, or Unresolved Issues
+
+Customers may request a human at any point. The agent must not trap them in repetitive automated answers when they need a person. Complaints, suspected fraud, urgent incidents, technical support requests, and other issues requiring judgment or investigation should be routed to authorized staff through the existing provider-facing interface, with appropriate priority and a concise summary of the conversation so the customer does not need to repeat everything.
+
+For emergencies or other time-critical risks, follow configured escalation rules and provide the appropriate verified emergency or official contact route; the bot must not imply that it has resolved the situation. If a human is not immediately available, explain the next step honestly and do not promise an unconfirmed response time. This uses the existing provider-facing side and does not require a separate support role or interface.
+
 ## Provider Answer and Return
 
 The provider may respond with text, a document, a ZIP archive, or a link. When the information is available and validated for the relevant scope:
@@ -312,9 +320,9 @@ Many isolated tenants
 
 The application should **not** create a separate Azure SQL database, vector database, or complete application instance for every provider or tenant by default.
 
-Isolation is enforced through deterministic relational scope. The implementation may use fields such as `tenant_id`, `provider_id`, and `customer_id`, but these are internal authorization and data-scoping identifiers, not a mandatory user-facing hierarchy. A provider/resource identifier is included in a query only when relevant to the operation or knowledge scope.
+Isolation is enforced through deterministic relational scope. `tenant_id` identifies the service-provider account and its data-isolation boundary. In knowledge and scheduling records, `provider_id` identifies a specific professional/resource only when relevant; it does not identify the provider-facing account or staff using its interface. `customer_id` identifies the customer when customer-specific scope applies.
 
-The authenticated application context supplies the allowed identifiers. The AI does not choose its tenant, provider/resource, or customer scope.
+The authenticated application context supplies the allowed identifiers. The AI does not choose its account, professional/resource, or customer scope.
 
 A fully isolated application environment belongs to the **self-hosted deployment model**, not to ordinary SaaS signup.
 
@@ -512,7 +520,7 @@ It must exclude:
 
 ```text
 1. Another customer's private knowledge
-2. Another provider's provider-specific knowledge
+2. Professional/resource-specific knowledge for a different professional/resource
 3. Another tenant's knowledge
 ```
 
@@ -524,12 +532,16 @@ AND (
     scope = TENANT
     OR (
         scope = PROVIDER
-        AND provider_id = current_provider
+        AND provider_id = current_professional_or_resource_when_relevant
+        AND customer_id IS NULL
     )
     OR (
         scope = CUSTOMER
-        AND provider_id = current_provider
         AND customer_id = current_customer
+        AND (
+            provider_id IS NULL
+            OR provider_id = current_professional_or_resource_when_relevant
+        )
     )
 )
 ```
@@ -1138,7 +1150,7 @@ The backend decides whether that operation is valid and authorized.
 
 The initial hosted SaaS should use a **container-first, event-driven architecture** to keep runtime behavior as consistent as practical across local development, floci-az, and Azure. Azure Container Apps is the preferred hosted runtime for containerized components, with Docker providing a common packaging model.
 
-The Next.js frontend, backend API, channel adapters, and background workers can be deployed as separate containers according to scaling and protocol needs. They share application contracts and infrastructure abstractions rather than requiring one monolithic process.
+Start with the fewest containers that meet the product's needs: a shared application/API and a background worker/scheduler. Split channel adapters or other components into separate containers only when a platform protocol, isolation requirement, or measured scaling need justifies it. Share application contracts and infrastructure abstractions across those components.
 
 Persistent channel adapters are allowed where a protocol requires them, such as maintaining a Discord Gateway WebSocket connection. Webhook-based channels can deliver messages to API endpoints. Some adapters or workers may need active replicas, but not every application component needs to run continuously.
 
@@ -1180,7 +1192,7 @@ Outbound Notification
 
 Each incoming request and worker job should remain bounded.
 
-Long-running workflows must use durable, resumable state and be decomposed into independent events, queued jobs, and bounded executions. Pending work must survive request completion, retries, and process restarts. The initial design should use Azure SQL for durable job/workflow state and Azure Queue Storage or Service Bus for queued delivery, selecting only the features validated in floci-az. A queue is a delivery mechanism, not a complete workflow orchestrator; workflow state, idempotency, retries, scheduling, and recovery must be designed explicitly.
+Long-running workflows must use durable, resumable state and be decomposed into independent events, queued jobs, and bounded executions. Pending work must survive request completion, retries, and process restarts. The initial design should use Azure SQL for durable job/workflow state and one queue implementation validated in floci-az for queued delivery; do not implement both Azure Queue Storage and Service Bus by default. A queue is a delivery mechanism, not a complete workflow orchestrator; workflow state, idempotency, retries, scheduling, and recovery must be designed explicitly.
 
 Persistent adapters and workers are permitted where needed. The architecture does not require the entire application to run as one continuously active process.
 
@@ -1385,7 +1397,7 @@ Primary stack:
 - DaisyUI.
 - AI SDK.
 - Prisma.
-- Flask/Python services where appropriate.
+- Additional runtimes only when a concrete requirement justifies them.
 - Docker and containerized application services.
 - Azure Container Apps for hosted container runtime.
 - Azure Queue Storage or Service Bus for event/job delivery, selected according to verified floci-az support.
@@ -1516,7 +1528,7 @@ Two primary distribution models are planned.
 
 The project operates the infrastructure and organizations subscribe to the service.
 
-The default hosted architecture is shared and multi-tenant:
+The default hosted architecture is shared and multi-tenant. The initial product interaction is messaging-first; if a web frontend is included, it belongs to the provider-facing setup/administration side and does not introduce a third product-facing role. Public customer website chat remains future scope, not an MVP requirement.
 
 ```text
 Shared Next.js frontend
@@ -1994,7 +2006,7 @@ The first meaningful version should focus on the core front-desk workflow.
 - Mark/unmark spam contacts.
 - View spam contacts.
 - Broadcast messages.
-- Respond to escalated customer questions.
+- Respond to escalated customer questions, including prioritized human handoffs for complaints, suspected fraud, technical issues, urgent incidents, and other cases requiring human judgment.
 - Define follow-up reminder periods.
 - Supply reusable operational information.
 
@@ -2009,6 +2021,7 @@ The first meaningful version should focus on the core front-desk workflow.
 - Ask operational questions.
 - Explore published products/services from provider websites or connected catalogs.
 - Receive provider responses.
+- Request a human response and receive a clear handoff or next step for unresolved, sensitive, or urgent issues.
 
 ## Operational Knowledge
 
@@ -2017,12 +2030,12 @@ The first meaningful version should focus on the core front-desk workflow.
 - Non-blocking provider escalation for missing or unsatisfactory answers.
 - Durable pending-question tracking and asynchronous follow-up to original channels.
 - Matching new provider context to relevant unresolved questions.
-- Generic provider knowledge.
+- Account-wide and professional/resource-specific knowledge.
 - Customer-specific knowledge.
 - Embedding generation.
 - Azure SQL vector storage.
 - Semantic retrieval.
-- Deterministic tenant/provider/customer filtering.
+- Deterministic account/customer filtering, with professional/resource filtering only when relevant.
 - Optional knowledge expiration.
 
 ## Automation
@@ -2056,6 +2069,7 @@ The first meaningful version should focus on the core front-desk workflow.
 - Authorized context retrieval.
 - Provider escalation without blocking ongoing conversations.
 - Customer-requested clarification of unsatisfactory answers.
+- Human handoff for urgent, sensitive, or unresolved requests, using the existing provider-facing interface.
 
 ## Database
 
@@ -2209,9 +2223,7 @@ Its advantage is the combination of:
 
 Instead of ending a conversation when information is unavailable, the system can obtain the missing information from the service provider, answer the customer, and retain appropriately scoped operational knowledge for future requests.
 
-Generic provider answers become reusable provider knowledge.
-
-Customer-specific answers remain associated with that customer and cannot become visible to unrelated customers.
+Account-wide answers become reusable account-wide knowledge; professional/resource-specific answers remain scoped to the relevant professional or resource. Customer-specific answers remain associated with that customer and cannot become visible to unrelated customers.
 
 The hosted SaaS shares application and database infrastructure by default while enforcing deterministic internal account, provider/resource, and customer boundaries for relational and vector retrieval. These implementation details support the simple customer-facing/provider-facing product model rather than defining additional conversational roles.
 
@@ -2289,7 +2301,7 @@ The system supports provider availability management, appointment and meeting sc
 | Tours and experiences | Change reserved dates, times, or sessions where permitted |
 | Other scheduled services | Adapt scheduling and reservation changes to provider-defined rules |
 
-Initially, the generalized extension focuses on **rescheduling or modifying existing reservations**, while retaining the appointment and meeting workflows already defined. New reservation creation, cancellations, and more complex modifications can be introduced incrementally.
+Initially, the generalized extension focuses on **rescheduling or modifying existing reservations in additional reservation domains or connected systems**, while retaining the appointment and meeting workflows already defined. Appointment/meeting creation and cancellation remain part of the core front-desk workflow; creation, cancellation, and complex modifications for additional reservation types can be introduced incrementally.
 
 All changes must respect authorization, availability, applicable conditions, and the connected system's capabilities. The original reservation should remain unchanged if a requested modification cannot be completed successfully.
 
