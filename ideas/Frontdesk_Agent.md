@@ -358,7 +358,7 @@ This information can subsequently be retrieved through semantic similarity rathe
 
 # Tenant-Wide Operational Knowledge
 
-Some information applies to the whole service organization rather than one provider.
+Some information applies to the whole service-provider account rather than one professional or resource.
 
 Examples include:
 
@@ -1494,9 +1494,11 @@ A service provider or organization may operate the system using:
 - A local/private AI endpoint.
 - Their own messaging and networking configuration.
 
+For the MVP, Azure-independent operation means validating the same containerized application and required supporting services through floci-az. Supporting arbitrary alternative databases, vector engines, or queues is not required unless a concrete need justifies it.
+
 The abstraction should allow equivalent local implementations of:
 
-- Containerized API, channel-adapter, and worker execution.
+- Containerized application and worker execution.
 - Queue/event delivery.
 - Timed jobs and scheduled dispatch.
 - Durable asynchronous workflow execution, using equivalent supported mechanisms where necessary.
@@ -2078,13 +2080,13 @@ The first meaningful version should focus on the core front-desk workflow.
 - Azure SQL native vectors for semantic operational knowledge.
 - Dedicated vector repository abstraction.
 - No direct AI-to-database access.
-- Deterministic tenant/customer scoping.
+- Deterministic account/customer scoping, with professional/resource scope when relevant.
 
 ## Infrastructure
 
 - Azure Container Apps for hosted containerized services.
-- Containerized frontend, API, channel adapters, and background workers.
-- Azure Queue Storage or Service Bus for queued event/job delivery, subject to verified floci-az support.
+- Start with a shared application/API container and a background worker/scheduler; separate channel adapters only where platform protocols require them.
+- One queue implementation selected according to verified floci-az support.
 - Azure SQL for operational and durable workflow/job state.
 - Azure SQL vector search.
 - Prisma.
