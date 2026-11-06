@@ -1174,19 +1174,19 @@ The product requirements and core architecture remain independent of specific ve
 - **Application framework:** Next.js.
 - **UI styling:** DaisyUI.
 - **AI integration:** AI SDK, behind an application-level model/provider abstraction.
-- **Relational data access:** Prisma ORM.
+- **Relational data access:** [Prisma ORM](https://www.prisma.io/docs/orm/core-concepts/supported-databases/postgresql) with its PostgreSQL connector.
 - **Additional runtimes:** Only when a concrete requirement justifies them.
 
 ## Relational Database
 
 **PostgreSQL is the first-choice and first-class database target.** It is the preferred starting point for development, testing, hosted deployment, and self-hosted operation.
 
-PostgreSQL is preferred because the same established relational engine can be self-hosted, packaged for supported CPU architectures including ARM, and obtained from multiple managed database providers. The PostgreSQL project documents ARM among the architectures on which PostgreSQL can be expected to work. Platform-specific builds, container images, extensions, and drivers must still be validated.
+PostgreSQL is preferred because the same established relational engine can be self-hosted, packaged for supported CPU architectures including ARM, and obtained from multiple managed database providers. The [PostgreSQL platform documentation](https://www.postgresql.org/docs/16/supported-platforms.html) lists ARM among the architectures on which PostgreSQL can be expected to work. This engine-level portability does not mean every managed database provider offers ARM-backed compute. In particular, check Azure Database for PostgreSQL Flexible Server's [region and compute availability](https://learn.microsoft.com/en-us/azure/postgresql/overview) rather than assuming ARM-based managed instances are available. Platform-specific builds, container images, extensions, and drivers must still be validated.
 
 Possible PostgreSQL deployment options include:
 
-1. **Azure:** Azure Database for PostgreSQL Flexible Server for managed Azure hosting.
-2. **Other managed providers:** Amazon RDS for PostgreSQL, Google Cloud SQL for PostgreSQL, and other managed PostgreSQL services.
+1. **Azure:** [Azure Database for PostgreSQL Flexible Server](https://learn.microsoft.com/en-us/azure/postgresql/overview) for managed Azure hosting.
+2. **Other managed providers:** [Amazon RDS for PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_PostgreSQL.html), [Google Cloud SQL for PostgreSQL](https://cloud.google.com/sql/postgresql), and other managed PostgreSQL services.
 3. **Self-hosted:** Community PostgreSQL running in the organization's own infrastructure or containers, including supported ARM-based environments.
 
 These providers offer PostgreSQL-compatible database services, but they do not guarantee identical extensions, versions, connection behavior, compute architectures, or operational features. Validate the features required by the application against the selected provider and region instead of assuming every service is interchangeable.
