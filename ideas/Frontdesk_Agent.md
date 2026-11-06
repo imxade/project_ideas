@@ -318,7 +318,7 @@ One shared relational database
 Many isolated tenants
 ```
 
-The application should **not** create a separate relational database database or complete application instance for every provider or tenant by default.
+The application should **not** create a separate physical relational database or complete application instance for every provider or tenant by default.
 
 Isolation is enforced through deterministic relational scope. `tenant_id` identifies the service-provider account and its data-isolation boundary. In knowledge and scheduling records, `provider_id` identifies a specific professional/resource only when relevant; it does not identify the provider-facing account or staff using its interface. `customer_id` identifies the customer when customer-specific scope applies.
 
@@ -330,7 +330,7 @@ A fully isolated application environment belongs to the **self-hosted deployment
 
 # Operational Knowledge and Text-Based Context Storage
 
-The current preferred design stores reusable operational knowledge as **ordinary text records in relational database**, together with relational metadata that defines where each record applies. The text is the source of truth. This is the initial approach for hosted and self-hosted deployments.
+The current preferred design stores reusable operational knowledge as **ordinary text records in the relational database**, together with relational metadata that defines where each record applies. The text is the source of truth. This is the initial approach for hosted and self-hosted deployments.
 
 The application does not require a separate vector database, embeddings, or semantic search for the MVP. Knowledge is not split into independent physical databases or files for each customer; account-wide, professional/resource-specific, and customer-specific information uses the same logical record model with different enforced scopes.
 
@@ -522,7 +522,7 @@ Semantic/vector search is **not part of the current preferred implementation or 
 
 It remains an open design question whether a future deployment would benefit enough from semantic or hybrid search to justify the additional indexing, embedding, evaluation, and operational complexity. Reconsider it only if practical testing shows that the text-first approach regularly misses relevant information in large or varied source collections, or that the authorized text cannot be selected and supplied efficiently through metadata, source references, and bounded context assembly.
 
-If that need is demonstrated, evaluate options such as conventional full-text retrieval, hybrid keyword/semantic retrieval, or relational database's native vector capabilities. Any such retrieval would remain optional and must operate only after deterministic tenant, professional/resource, and customer scope filtering. The original scoped text remains the source of truth; an embedding, if ever introduced, is only a derived retrieval aid. A separate vector database is not currently planned or required.
+If that need is demonstrated, evaluate options such as conventional full-text retrieval, hybrid keyword/semantic retrieval, or native database extensions or provider-supported vector options. Any such retrieval would remain optional and must operate only after deterministic tenant, professional/resource, and customer scope filtering. The original scoped text remains the source of truth; an embedding, if ever introduced, is only a derived retrieval aid. A separate vector database is not currently planned or required.
 
 # Spam Management
 
@@ -968,7 +968,7 @@ Outbound Notification
 
 Each incoming request and worker job should remain bounded.
 
-Long-running workflows must use durable, resumable state and be decomposed into independent events, queued jobs, and bounded executions. Pending work must survive request completion, retries, and process restarts. The initial design should use relational database for durable job/workflow state and one queue implementation validated in floci-az for queued delivery; select one queue implementation by default and do not add a second queue provider without a concrete need. A queue is a delivery mechanism, not a complete workflow orchestrator; workflow state, idempotency, retries, scheduling, and recovery must be designed explicitly.
+Long-running workflows must use durable, resumable state and be decomposed into independent events, queued jobs, and bounded executions. Pending work must survive request completion, retries, and process restarts. The initial design should use the relational database for durable job/workflow state and one queue implementation validated in floci-az for queued delivery. Do not add a second queue provider without a concrete need. A queue is a delivery mechanism, not a complete workflow orchestrator; workflow state, idempotency, retries, scheduling, and recovery must be designed explicitly.
 
 Persistent adapters and workers are permitted where needed. The architecture does not require the entire application to run as one continuously active process.
 
@@ -1004,7 +1004,7 @@ This supports horizontal scaling, retries, and recovery without tying an entire 
 
 Scheduled and time-dependent workflows should use persisted due-work records, a scheduler/dispatcher, and queue-driven workers. The initial implementation should favor a containerized scheduler/worker that can run the same code locally and in Azure, using only scheduling and messaging features validated through floci-az.
 
-relational database stores due times and job state. The scheduler/dispatcher periodically discovers due work and enqueues bounded jobs. It must tolerate restarts and repeated scans, and use safe claiming or idempotency controls to prevent duplicate effects.
+The relational database stores due times and job state. The scheduler/dispatcher periodically discovers due work and enqueues bounded jobs. It must tolerate restarts and repeated scans, and use safe claiming or idempotency controls to prevent duplicate effects.
 
 Examples include:
 
@@ -1023,7 +1023,7 @@ A simplified flow is:
 ```text
 Containerized Scheduler / Dispatcher
       ↓
-Query relational database for due jobs
+Query the relational database for due jobs
       ↓
 Enqueue due events/jobs
       ↓
@@ -1038,7 +1038,7 @@ The scheduler/dispatcher should discover and dispatch work rather than perform e
 
 # Appointment Reminder Example
 
-An appointment can contain reminder state stored in relational database.
+An appointment can contain reminder state stored in the relational database.
 
 ```text
 Appointment
@@ -1068,7 +1068,7 @@ Containerized Messaging Worker
       ↓
 Configured Messaging Channel
       ↓
-Update relational database
+Update the relational database
 ```
 
 ---
@@ -1327,18 +1327,18 @@ Shared web frontend
         +
 Shared containerized API and worker services
         +
-Shared relational database database
+Shared relational database
         +
 Tenant/provider/customer scoped data
 ```
 
-Ordinary account creation does not provision a new application stack or relational database database.
+Ordinary account creation does not provision a new application stack or relational database.
 
 The hosted version may provide:
 
 - Azure-hosted infrastructure.
 - managed container runtime for containerized application services.
-- relational database for relational data and scoped text-based operational knowledge.
+- relational database for operational data and scoped text-based operational knowledge.
 - Queue-backed event delivery and containerized background workers.
 - Durable scheduled-job state and dispatch.
 - Messaging integrations.
@@ -1535,7 +1535,7 @@ A typical customer request follows approximately:
         ↓
 13. Execute deterministic operation
         ↓
-14. Persist state through ORM/relational database
+14. Persist state through the ORM and relational database
         ↓
 15. Emit events where necessary
         ↓
@@ -1589,7 +1589,7 @@ The agent does not have to wait for provider response before accepting further i
 ```text
 1. Containerized scheduler/dispatcher runs
         ↓
-2. Query relational database for due jobs
+2. Query the relational database for due jobs
         ↓
 3. Claim/mark work for processing
         ↓
@@ -1601,7 +1601,7 @@ The agent does not have to wait for provider response before accepting further i
         ↓
 7. Send notification if required
         ↓
-8. Persist status through ORM/relational database
+8. Persist status through the ORM and relational database
 ```
 
 Scheduled operations should be idempotent where possible so retries do not create duplicate notifications or duplicate state changes.
@@ -1883,7 +1883,7 @@ The AI must not:
 - Provide medical advice as part of the front-desk system.
 - Read records belonging to unrelated customers.
 - Execute arbitrary database queries.
-- Connect directly to relational database.
+- Connect directly to the relational database.
 - Request or receive context outside the backend-authorized scope.
 - Retrieve another customer's private operational context.
 - Modify provider availability on behalf of a customer.
@@ -1910,7 +1910,7 @@ The application backend remains the authority for permissions and state.
 The initial hosted system does **not** require:
 
 - A mandatory vector database or vector-search service.
-- A separate relational database database per tenant.
+- A separate relational database per tenant.
 - A separate application deployment per tenant.
 - Automatic Azure infrastructure provisioning on every signup.
 - Cross-tenant customer identity merging.
@@ -2002,11 +2002,11 @@ Account-wide answers become reusable account-wide knowledge; professional/resour
 
 The hosted SaaS shares application and database infrastructure by default while enforcing deterministic internal account, provider/resource, and customer boundaries before authorized text context reaches the AI. These implementation details support the simple customer-facing/provider-facing product model rather than defining additional conversational roles.
 
-relational database provides relational operational state and scoped text-based operational knowledge for hosted deployments, while ORM remains the primary application data-access abstraction.
+The selected relational database provides operational state and scoped text-based operational knowledge for hosted deployments, accessed through the application's ORM.
 
 AI integration layer prevents the application's conversational layer from becoming tightly coupled to one model vendor and allows hosted, customer-provided, private, or local model configurations.
 
-A containerized scheduler/dispatcher and queue-driven workers handle scheduled work and retries, with durable job state stored in relational database.
+A containerized scheduler/dispatcher and queue-driven workers handle scheduled work and retries, with durable job state stored in the relational database.
 
 floci-az allows the architecture to be validated, operated, and self-hosted independently of Azure.
 
