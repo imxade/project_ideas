@@ -242,7 +242,7 @@ The provider may respond with text, a document, a ZIP archive, or a link. When t
 4. Send the specific answer or clarification back through the **original customer's conversation/channel**, even if they have asked other questions since.
 5. Mark only the successfully resolved questions as complete; unrelated or insufficiently answered questions remain pending.
 
-Knowledge embedding and indexing may continue asynchronously without holding up a follow-up that can already be answered from validated source text.
+Source extraction or preparation of additional bounded text context may continue asynchronously without holding up a follow-up that can already be answered from validated source text.
 
 Conceptually:
 
@@ -318,7 +318,7 @@ One shared Azure SQL database
 Many isolated tenants
 ```
 
-The application should **not** create a separate Azure SQL database, vector database, or complete application instance for every provider or tenant by default.
+The application should **not** create a separate Azure SQL database or complete application instance for every provider or tenant by default.
 
 Isolation is enforced through deterministic relational scope. `tenant_id` identifies the service-provider account and its data-isolation boundary. In knowledge and scheduling records, `provider_id` identifies a specific professional/resource only when relevant; it does not identify the provider-facing account or staff using its interface. `customer_id` identifies the customer when customer-specific scope applies.
 
@@ -328,72 +328,58 @@ A fully isolated application environment belongs to the **self-hosted deployment
 
 ---
 
-# Operational Knowledge and Vector Search
+# Operational Knowledge and Text-Based Context Storage
 
-Azure-hosted deployments will use **Azure SQL's native vector capabilities** to store and retrieve semantic operational knowledge.
+The current preferred design stores reusable operational knowledge as **ordinary text records in Azure SQL**, together with relational metadata that defines where each record applies. The text is the source of truth. This is the initial approach for hosted and self-hosted deployments.
 
-The hosted SaaS uses a shared operational knowledge table rather than creating a separate physical vector database for every provider.
+The application does not require a separate vector database, embeddings, or semantic search for the MVP. Knowledge is not split into independent physical databases or files for each customer; account-wide, professional/resource-specific, and customer-specific information uses the same logical record model with different enforced scopes.
 
-Provider responses that may be useful in future conversations can be stored together with an embedding and ordinary relational scope metadata such as `tenant_id`, `provider_id`, and `customer_id`.
-
-The vector determines semantic relevance. The relational columns determine which records are allowed to participate in the search.
-
-The primary use case is information that the provider supplied after the system could not answer a customer's question.
-
-Examples include:
-
-- Holiday opening hours.
-- Service availability.
-- Office procedures.
-- Preparation instructions that are operational rather than medical.
-- Parking information.
-- Payment procedures.
-- General scheduling rules.
-- Whether a particular service is offered.
-- Temporary operational changes.
-
-This information can subsequently be retrieved through semantic similarity rather than requiring exact wording.
-
----
-
-# Tenant-Wide Operational Knowledge
-
-Some information applies to the whole service-provider account rather than one professional or resource.
-
-Examples include:
-
-- Organization-wide opening hours.
-- Holiday closures.
-- Parking information.
-- General payment procedures.
-- Common booking rules.
-- Shared office instructions.
-
-A tenant-wide record may conceptually contain:
+A conceptual record may contain:
 
 ```text
 OperationalKnowledge
 ├── id
 ├── tenant_id
-├── provider_id = NULL
-├── customer_id = NULL
-├── scope = TENANT
-├── content
-├── embedding
+├── scope                 // TENANT, PROVIDER, CUSTOMER
+├── provider_id           // Professional/resource ID when relevant
+├── customer_id           // Customer ID for private information
+├── content               // Plain-text context
+├── category              // Optional operational category
+├── source_reference      // Source message, file, URL, or repository location
 ├── created_at
-├── valid_until (optional)
+├── updated_at
+├── valid_from            // Optional
+├── valid_until           // Optional
 └── active
 ```
 
-This information may be used across providers within that tenant when relevant.
+Original documents, ZIP archives, URLs, and repository files may be supplied as **source material**. The application extracts or fetches useful text and stores source-linked text records or sections for the agent to use. An original file may be retained when needed for traceability, but the operational knowledge model is text-based rather than dependent on retrieving entire document files at answer time.
 
-It must never be visible to another tenant.
+## Knowledge Scope
 
----
+Knowledge has three logical scopes:
 
-# Professional- or Resource-Specific Knowledge
+- **TENANT:** Information that applies across the service-provider account, such as general opening hours, shared policies, payment procedures, or organization-wide announcements. Both `provider_id` and `customer_id` are null.
+- **PROVIDER:** Information specific to a professional, service, location, or resource. It includes the tenant and the relevant `provider_id`; `customer_id` is null.
+- **CUSTOMER:** Private information or an exception associated with a verified customer. It includes the tenant and `customer_id`, with `provider_id` only when the information is also tied to a particular professional/resource.
 
-Knowledge that applies only to one professional, service, location, or resource should be scoped to that specific target. Information that applies across the whole organization belongs in **tenant/account-wide operational knowledge** instead; it should not be duplicated across individual professionals.
+These are logical scopes in the shared data model, not separate databases or a requirement to create one text file per customer.
+
+### Tenant-Wide Knowledge
+
+Examples include:
+
+- Organization-wide opening hours and holiday closures.
+- Parking information.
+- General payment procedures.
+- Common booking rules.
+- Shared office instructions.
+
+A tenant-wide record has `scope = TENANT`, with no professional/resource or customer association. It may be used across the relevant professionals and resources within that tenant, but never outside that tenant.
+
+### Professional- or Resource-Specific Knowledge
+
+Knowledge that applies only to one professional, service, location, or resource should be scoped to that target. Information that applies across the whole organization belongs in tenant-wide knowledge instead and should not be duplicated across individual professionals.
 
 For example:
 
@@ -405,35 +391,11 @@ Provider-facing response:
 
 > Dr. A offers consultations on Saturdays from 9 AM until noon.
 
-A knowledge record may conceptually contain:
+The record has `scope = PROVIDER` and the relevant professional/resource ID. It can be used when that professional/resource is relevant to the current request or booking. A conversation must not be assigned to a professional merely because the customer spoke to that professional previously.
 
-```text
-OperationalKnowledge
-├── id
-├── tenant_id
-├── provider_id (professional/resource scope, when applicable)
-├── customer_id = NULL
-├── scope = PROVIDER
-├── content
-├── embedding
-├── created_at
-├── updated_at
-├── valid_until (optional)
-├── active
-└── source/reference metadata
-```
+### Customer-Specific Knowledge
 
-Because `customer_id` is absent, the information may be retrieved for customers whose current request or booking makes that professional/resource relevant. The system must not assume that every customer conversation belongs to a specific professional.
-
-Semantic retrieval must first remain scoped to the organization/account and, when applicable, the relevant professional/resource.
-
----
-
-# Customer-Specific Knowledge
-
-Some provider responses apply only to a particular customer.
-
-Those responses should also be available for future conversations, but **must never become general provider knowledge**.
+Some provider responses apply only to one customer and must never become general provider knowledge.
 
 For example:
 
@@ -443,88 +405,36 @@ Customer:
 
 Provider:
 
-> Yes, for Rahul tomorrow you can come at 9:30 AM.
+> Yes, Rahul can come at 9:30 AM tomorrow.
 
-That information is specific to that customer.
+The record has `scope = CUSTOMER` and Rahul's verified customer ID. It may also include a professional/resource ID when the exception is tied to that target.
 
-A corresponding record may contain:
+## Scope Classification and Safe Storage
 
-```text
-OperationalKnowledge
-├── id
-├── tenant_id
-├── provider_id (optional; only if tied to a specific professional/resource)
-├── customer_id
-├── scope = CUSTOMER
-├── content
-├── embedding
-├── created_at
-├── valid_until (optional)
-├── active
-└── source/reference metadata
-```
+The AI may interpret a provider's response and **propose** whether the information is tenant-wide, professional/resource-specific, or customer-specific. The authenticated application context supplies the tenant, provider/resource, and customer identifiers; the AI must not invent or select those identifiers.
 
-Customer-specific knowledge may apply to the customer across the service-provider account, or only in relation to a particular professional/resource. Store that association explicitly rather than inferring it from the customer's conversation history.
+The backend validates the proposed scope and the provider's authority before saving the record. Information must not be made broader merely because the model guesses that it sounds general:
 
-The customer association is stored as ordinary relational metadata.
+- An explicit provider instruction that information applies to all relevant customers can be stored as tenant-wide knowledge.
+- A response tied to one named customer or one customer's pending question defaults to customer-specific knowledge.
+- Professional/resource-specific information is stored against that professional/resource only when the target is clear.
+- If the scope is ambiguous, keep the narrower scope or ask the provider to clarify before making it generally available.
 
-The embedding represents the semantic meaning of the content.
+A response produced because of one customer's escalated question should default to **customer-specific** knowledge. It may become tenant-wide only when the provider explicitly confirms that it is generally applicable. This prevents a private exception from accidentally becoming clinic-wide policy.
 
-The system **must not rely on the customer's name being embedded into the vector to enforce customer isolation**.
+## Context Assembly and Retrieval
 
-Instead, retrieval must deterministically constrain the query:
+The preferred initial retrieval method is to **provide the AI with the complete, authorized, reasonably sized text context** needed for the current request. The model can interpret that context and select the relevant facts without requiring a separate search engine.
 
-```text
-tenant_id = current_account
-AND (
-    scope = TENANT
-    OR (
-        scope = PROVIDER
-        AND provider_id = current_professional_or_resource_when_relevant
-        AND customer_id IS NULL
-    )
-    OR (
-        scope = CUSTOMER
-        AND customer_id = current_customer
-        AND (
-            provider_id IS NULL
-            OR provider_id = current_professional_or_resource_when_relevant
-        )
-    )
-)
-```
+For each customer request, the backend should:
 
-Only after this scope is established should semantic similarity determine which permitted records are relevant.
+1. Resolve the tenant and verified customer from authenticated channel identity.
+2. Determine whether a particular professional/resource is relevant from the current request, an applicable booking, or an explicit customer choice.
+3. Retrieve active tenant-wide text, applicable professional/resource text, and only that customer's private text.
+4. Retrieve live structured records such as appointments and availability through their dedicated backend operations rather than relying on copied text.
+5. Supply the bounded context to the AI through the AI SDK.
 
-This ensures that vector similarity can never accidentally expose another customer's context.
-
----
-
-# Knowledge Retrieval Rules
-
-Operational knowledge retrieval is always scoped before semantic ranking.
-
-## Customer Request
-
-A customer may retrieve:
-
-```text
-1. Organization/account-wide knowledge for the current service-provider account
-2. Professional- or resource-specific knowledge when that professional/resource is relevant to the current request or booking
-3. Customer-specific knowledge for the verified customer
-```
-
-A conversation is not automatically assigned to an individual doctor or professional. Use an existing booking or an explicit customer choice when a particular professional/resource matters; otherwise use the shared front-desk intake and booking flow. Do not infer the intended professional from booking history or recent interactions. If a booking requires a choice that is not yet known, ask the customer or follow the provider's normal intake rules.
-
-It must exclude:
-
-```text
-1. Another customer's private knowledge
-2. Professional/resource-specific knowledge for a different professional/resource
-3. Another tenant's knowledge
-```
-
-A conceptual authorization filter is:
+The backend must apply authorization and scope filters **before** any text reaches the model. A customer request may receive:
 
 ```text
 tenant_id = current_tenant
@@ -546,135 +456,73 @@ AND (
 )
 ```
 
-Only the records allowed by this scope participate in vector similarity ranking.
+It must exclude another tenant's knowledge, another customer's private information, and professional/resource-specific knowledge for an unrelated professional/resource.
 
-## Specificity Precedence
+When the authorized text collection is small enough, provide all applicable active text directly. Do not send every tenant record, every customer's information, or unbounded conversation history. Large requests must be bounded or paginated.
 
-When multiple equally relevant active records apply, prefer the more specific scope:
+If the source collection becomes too large to provide as a whole, the backend can select additional context using explicit scope, category, source IDs, dates, or section references. The AI may request an additional approved source or section through a constrained backend operation; the backend still applies authorization and size limits. This does not require free-form database access or a semantic search engine.
+
+For large uploaded sources, text may be divided into source-linked sections so only bounded portions need to be supplied. This is a content-management and context-size measure, not a requirement to generate embeddings or perform vector search.
+
+### Specificity and Conflicts
+
+When multiple applicable records address the same subject, prefer the most specific valid scope:
 
 ```text
 Customer-specific
         ↓
-Provider-specific
+Professional/resource-specific
         ↓
 Tenant-wide
 ```
 
-A specific temporary exception therefore does not overwrite the general rule.
+A specific temporary exception does not overwrite the general rule. Validity dates, status, source, and update history must be considered. If two active records at the same scope conflict and the system cannot determine which one is current, ask the provider rather than guessing. Similar wording or model confidence does not establish which factual statement is true.
 
-If two active records at the same scope genuinely conflict and the system cannot deterministically determine which is current, it should ask the provider instead of guessing.
+### Provider Context Access
 
-## Provider Request
+A provider may access tenant-wide knowledge, professional/resource-specific knowledge within their authorized scope, and customer-specific information only when the requested operation and authorization allow access to that customer. Provider access remains subject to deterministic application authorization.
 
-A provider may retrieve:
+## Knowledge Lifecycle and Time-Sensitive Context
 
-- Tenant-wide knowledge available within their tenant.
-- Professional/resource-specific operational knowledge within their authorized scope.
-- Customer-specific knowledge only when the requested operation and authorization allow access to that customer.
-- Pending customer questions addressed to them.
+Provider responses should not automatically become permanent truth forever. Knowledge records should support:
 
-Provider access remains subject to deterministic application authorization.
-
-## Safe Storage Default for Escalated Answers
-
-A response produced because of one customer's escalated question should default to **customer-specific** knowledge unless it is clearly marked as generally applicable.
-
-If the provider indicates that the answer applies across the organization/account, store it at tenant/account scope. Use professional/resource scope only when the answer genuinely differs for that target.
-
-For ambiguous cases, the bot may ask whether the information should be remembered for all customers.
-
-This prevents a private answer from accidentally becoming generic knowledge.
-
----
-
-# Knowledge Lifecycle
-
-Provider responses should not automatically become permanent truth forever.
-
-Knowledge records should support metadata such as:
-
-- Creation timestamp.
-- Last modification timestamp.
-- Optional expiration.
+- Creation and last-modification timestamps.
+- Optional effective and expiration dates.
 - Active/inactive status.
-- Source conversation.
-- Provider identity.
-- Customer scope.
-- Organization scope.
+- Source conversation or source reference.
+- Provider identity and applicable scope.
 
-For temporary information such as:
-
-> We're closed next Tuesday.
-
-an expiration date can prevent obsolete information from being presented as current.
-
-## Time-Sensitive Knowledge
-
-Events, offers, temporary closures, and other dated announcements should be stored with their actual effective dates, times, and timezone where available.
+Events, offers, temporary closures, and other dated announcements should retain their actual effective dates, times, and timezone where available.
 
 - Resolve relative phrases such as "one week from now" against the **original message timestamp** and the provider's timezone, not the date of a future customer query. Ask for clarification if the date or time is genuinely ambiguous.
-- When a provider gives a start/end date or cancellation, retain that structured validity information alongside the source text and embedding.
-- Before answering questions about current or upcoming events/offers, compare those dates against the current time. Do not present expired or cancelled information as still active.
-- Historical information can remain stored for accurately answering questions about past events, but must be clearly described as past. Corrections and cancellations take precedence over stale announcements.
+- Retain start/end dates and cancellations as structured validity information alongside the source text.
+- Before answering questions about current or upcoming events/offers, compare those dates against the current time. Do not present expired or cancelled information as current.
+- Historical information may remain available for questions about past events, but must be clearly described as past. Corrections and cancellations take precedence over stale announcements.
 - If no reliable current information is available, ask the provider instead of assuming an old announcement still applies.
 
-The system therefore combines:
+The system uses **authorized scope + source context + validity period + current state** when preparing context for the AI.
 
-**semantic relevance + authorized scope + source context + validity period + current state**
+## Source Ingestion
 
-when retrieving knowledge. Embeddings find potentially relevant text; deterministic time checks establish whether a dated claim is still applicable.
+Service providers can add knowledge through plain text, documents, uploaded ZIP archives, links, and public repositories (including GitHub).
 
----
+- Plain text supplied directly by a provider can be stored as scoped operational knowledge.
+- Uploaded files and archives are processed in bounded background jobs. Useful text is extracted and stored as source-linked records or sections with the appropriate tenant/provider/customer scope. Original files may be retained as source material where needed.
+- Repository URLs can be saved as sources. Prefer fetching relevant files or sections when needed rather than requiring an upfront semantic index of the entire repository. Current public issues, pull requests, workflow runs, and available action logs can be fetched when a question requires fresh information.
+- Source content is treated as data, not executable instructions. Only approved or publicly accessible material should be retrieved.
+- Retain source references so responses can be grounded in the information actually supplied or retrieved.
 
-# Embedding Generation
-
-Embedding generation is separate from conversational model generation.
-
-When reusable operational knowledge is created or modified:
-
-```text
-Provider Response
-       ↓
-Determine Knowledge Scope
-       ↓
-Generic or Customer-Specific
-       ↓
-Generate Embedding
-       ↓
-Store Text + Vector + Scope Metadata
-       ↓
-Azure SQL
-```
-
-The configured deployment may determine which supported embedding model or endpoint is used.
-
-Embedding generation should remain behind the AI/model abstraction so deployments are not unnecessarily tied to a single commercial provider.
+If supplied context does not answer a question, the agent creates a persistent pending request and continues the current conversation. When the provider later supplies text, a file, or a link, the system checks authorized open pending questions against the new information and follows up with the original requesters. This matching can use bounded candidate questions and AI interpretation of the supplied text; vector search is not required for the workflow.
 
 ---
 
-# Embedding Consistency and Failure Handling
+# Open Design Question: Semantic and Vector Search
 
-For the shared hosted Azure SQL vector store, embeddings stored in the same vector column must use a consistent platform-selected embedding configuration.
+Semantic/vector search is **not part of the current preferred implementation or MVP requirement**. The current design uses text as the canonical knowledge representation, direct provision of bounded authorized context, ordinary relational queries, and source/section retrieval when additional content is needed.
 
-A service provider may choose their own conversational model through AI SDK without implicitly changing the embedding representation used by the shared knowledge store.
+It remains an open design question whether a future deployment would benefit enough from semantic or hybrid search to justify the additional indexing, embedding, evaluation, and operational complexity. Reconsider it only if practical testing shows that the text-first approach regularly misses relevant information in large or varied source collections, or that the authorized text cannot be selected and supplied efficiently through metadata, source references, and bounded context assembly.
 
-Embedding generation is asynchronous from the provider/customer conversation where practical.
-
-If storing the source text succeeds but embedding generation fails:
-
-```text
-Store source text
-      ↓
-embedding_status = PENDING
-      ↓
-Reply to the waiting customer
-      ↓
-Retry embedding generation later
-```
-
-The original provider answer remains the source of truth. The embedding is only a retrieval index.
-
----
+If that need is demonstrated, evaluate options such as conventional full-text retrieval, hybrid keyword/semantic retrieval, or Azure SQL's native vector capabilities. Any such retrieval would remain optional and must operate only after deterministic tenant, professional/resource, and customer scope filtering. The original scoped text remains the source of truth; an embedding, if ever introduced, is only a derived retrieval aid. A separate vector database is not currently planned or required.
 
 # Spam Management
 
@@ -728,9 +576,11 @@ Instead, it interacts with narrowly scoped backend tools such as:
 
 `broadcast_message(audience, message)`
 
-`search_operational_knowledge(query)`
+`get_authorized_operational_context()`
 
-`store_operational_knowledge(scope, content)`
+`get_source_section(source_reference, section_reference)`
+
+`propose_operational_knowledge(content, proposed_scope)`
 
 The authenticated tenant, provider, and customer identities are injected by application code rather than selected freely by the model.
 
@@ -747,7 +597,7 @@ The model therefore acts as a **natural-language reasoning and tool-selection la
 - Validation.
 - State transitions.
 - Database modifications.
-- Vector search boundaries.
+- Knowledge and source-context retrieval boundaries.
 
 ---
 
@@ -755,32 +605,20 @@ The model therefore acts as a **natural-language reasoning and tool-selection la
 
 For Azure-hosted deployments, the primary database will be **Azure SQL**.
 
-Azure SQL acts as both:
-
-1. The relational operational database.
-2. The vector-backed operational knowledge store.
-
-This avoids introducing a separate vector database for the initial architecture.
+Azure SQL is the relational operational database and the primary store for scoped text-based operational knowledge. The application stores knowledge content as ordinary text records alongside relational scope, validity, and source metadata.
 
 Azure SQL stores data such as:
 
-- Organizations.
-- Service providers.
-- Customers.
-- Messaging identities.
-- Provider availability.
-- Appointments.
-- Appointment status.
-- Reminder schedules.
-- Follow-up schedules.
-- Spam records.
-- Conversation metadata.
-- Operational knowledge.
-- Knowledge embeddings.
-- Provider questions.
-- Broadcast definitions.
-- AI configuration references.
-- Audit records where required.
+- Organizations and service-provider accounts.
+- Customers and messaging identities.
+- Provider/resource information.
+- Provider availability and appointments.
+- Appointment status and reminder schedules.
+- Follow-up schedules and pending questions.
+- Spam records and conversation metadata.
+- Scoped operational knowledge text and source references.
+- Broadcast definitions, AI configuration references, and audit records where required.
+- Durable workflow and scheduled-job state.
 
 The AI does not connect directly to Azure SQL.
 
@@ -788,7 +626,7 @@ The AI does not connect directly to Azure SQL.
 
 # Prisma
 
-**Prisma** will be used as the primary application ORM and database access layer for normal relational application data.
+**Prisma** will be used as the primary application ORM and database access layer.
 
 Conceptually:
 
@@ -800,62 +638,37 @@ Application Services
    Azure SQL
 ```
 
-Prisma will handle ordinary database operations such as:
-
-- Organizations.
-- Providers.
-- Customers.
-- Appointments.
-- Availability.
-- Reminders.
-- Spam state.
-- Messaging identities.
-- AI configuration metadata.
-- Operational knowledge metadata.
-
-Application code should preferably use Prisma rather than spreading SQL queries throughout the codebase.
+Prisma will handle ordinary relational operations, including scoped operational knowledge records and their metadata. Application code should preferably use Prisma rather than spreading SQL queries throughout the codebase.
 
 ---
 
-# Prisma and Vector Operations
+# Knowledge Service and Repository
 
-Azure SQL vector operations are database-specific functionality.
-
-The architecture should isolate those operations behind a dedicated repository/service abstraction.
+A knowledge service/repository should centralize operations for storing, updating, and assembling authorized text context. It should enforce the scope rules and return bounded source-linked text to application services.
 
 Conceptually:
 
 ```text
-Knowledge Service
-       │
-       ├── Normal metadata CRUD
-       │        ↓
-       │      Prisma
-       │
-       └── Vector operations
-                ↓
-       Typed SQL / Raw SQL /
-       Stored Procedure where required
-                ↓
-             Azure SQL
+Conversation / Provider Services
+              ↓
+        Knowledge Service
+              ↓
+            Prisma
+              ↓
+           Azure SQL
 ```
 
-This allows Prisma to remain the primary ORM without requiring the core application to depend on whether Prisma directly exposes every Azure SQL vector feature.
-
-The rest of the application should call functions such as:
+The application should use operations such as:
 
 ```text
-searchKnowledge(...)
 storeKnowledge(...)
+getAuthorizedContext(...)
+getSourceSection(...)
 updateKnowledge(...)
-removeKnowledge(...)
+deactivateKnowledge(...)
 ```
 
-rather than directly issuing vector SQL.
-
-This also provides an abstraction for self-hosted implementations.
-
----
+This keeps scope validation and context assembly in one place without requiring vector-specific SQL, embedding services, or a dedicated vector repository. A future retrieval strategy can be added behind the knowledge service if measured requirements justify it.
 
 # Database Access Boundary
 
@@ -1113,7 +926,6 @@ AI Configuration
      ├── Endpoint
      ├── Model
      ├── Credentials Reference
-     ├── Embedding Configuration
      └── Provider Options
               │
               ▼
@@ -1171,9 +983,7 @@ Resolve Identity
       ↓
 Authorize Request
       ↓
-Retrieve Context
-      ↓
-Retrieve Relevant Vector Knowledge
+Assemble Authorized Text Context
       ↓
 AI SDK
       ↓
@@ -1346,9 +1156,10 @@ Examples include:
 - Schedule-change notifications.
 - Routine follow-up reminders.
 - Provider-question escalation and customer-requested clarification.
-- Matching newly supplied context to unresolved pending questions.
+- Extracting and normalizing supplied files or archives into source-linked text.
+- Matching newly supplied context to bounded candidate pending questions within authorized scope.
 - Returning provider answers to the original customer conversations.
-- Generating embeddings and updating vector knowledge.
+- Refreshing source material when requested or scheduled.
 - Retrying failed outbound messages.
 - Scheduled maintenance.
 
@@ -1369,11 +1180,14 @@ Provider replies     Customer continues
 later                using the agent
       │
       ▼
-Store/validate new context
+Store/validate scoped text context
       │
       ▼
-Find related OPEN questions
+Identify candidate open questions
 within authorized scope
+      │
+      ▼
+Check whether the new context answers each question
       │
       ▼
 Send answers asynchronously
@@ -1381,12 +1195,8 @@ to original customer channels
       │
       ▼
 Mark answered questions resolved
-      │
-      ▼
-Generate embeddings as needed
 ```
 
----
 
 
 # Infrastructure Direction
@@ -1401,7 +1211,7 @@ Primary stack:
 - Docker and containerized application services.
 - Azure Container Apps for hosted container runtime.
 - Azure Queue Storage or Service Bus for event/job delivery, selected according to verified floci-az support.
-- Azure SQL and Azure SQL vector search.
+- Azure SQL for relational operational data and scoped text-based knowledge.
 - Terraform where applicable.
 - floci-az for local development, validation, and self-hosted operation.
 - Event-driven processing with durable workflow/job state.
@@ -1457,7 +1267,7 @@ The Azure-hosted architecture will use:
 
 - Azure Container Apps for containerized frontend, API, channel-adapter, and background-worker components as appropriate.
 - Azure SQL for relational data and durable workflow/job state.
-- Azure SQL vector capabilities for operational knowledge.
+- Azure SQL for relational operational data, scoped text-based knowledge, and durable workflow/job state.
 - Azure Queue Storage or Azure Service Bus for queued event/job delivery, based on the features validated through floci-az.
 - Prisma for relational application access.
 - Event-driven processing and bounded worker jobs.
@@ -1489,12 +1299,12 @@ A service provider or organization may operate the system using:
 - floci-az.
 - Local/private infrastructure.
 - A compatible relational database.
-- A compatible vector-search implementation.
+- Compatible source/file storage where supplied files need to be retained.
 - A compatible queue/event-delivery mechanism.
 - A local/private AI endpoint.
 - Their own messaging and networking configuration.
 
-For the MVP, Azure-independent operation means validating the same containerized application and required supporting services through floci-az. Supporting arbitrary alternative databases, vector engines, or queues is not required unless a concrete need justifies it.
+For the MVP, Azure-independent operation means validating the same containerized application and required supporting services through floci-az. Supporting arbitrary alternative databases or queues is not required unless a concrete need justifies it.
 
 The abstraction should allow equivalent local implementations of:
 
@@ -1502,12 +1312,10 @@ The abstraction should allow equivalent local implementations of:
 - Queue/event delivery.
 - Timed jobs and scheduled dispatch.
 - Durable asynchronous workflow execution, using equivalent supported mechanisms where necessary.
-- Relational storage.
-- Vector retrieval.
+- Relational storage and scoped text-based knowledge.
+- Source/file storage where uploaded source material needs to be retained.
 
 without rewriting the higher-level business logic.
-
----
 
 # Future Infrastructure Exploration
 
@@ -1542,13 +1350,13 @@ Shared Azure SQL database
 Tenant/provider/customer scoped data
 ```
 
-Ordinary account creation does not provision a new application stack, Azure SQL database, or vector database.
+Ordinary account creation does not provision a new application stack or Azure SQL database.
 
 The hosted version may provide:
 
 - Azure-hosted infrastructure.
 - Azure Container Apps for containerized application services.
-- Azure SQL and vector-backed operational knowledge.
+- Azure SQL for relational data and scoped text-based operational knowledge.
 - Queue-backed event delivery and containerized background workers.
 - Durable scheduled-job state and dispatch.
 - Messaging integrations.
@@ -1571,7 +1379,6 @@ The self-hosted version may use:
 - Terraform where applicable.
 - floci-az.
 - Compatible relational storage.
-- Compatible vector retrieval.
 - Local scheduling equivalents.
 - The organization's network.
 - The organization's own AI API.
@@ -1630,13 +1437,12 @@ Infrastructure
 ├── Azure
 │   ├── Azure Container Apps
 │   ├── Queue Storage / Service Bus
-│   ├── Azure SQL
-│   └── Vector Search
+│   └── Azure SQL
 │
 └── Local / Self-Hosted / floci-az
     ├── Docker Containers
     ├── Compatible Queue / Event Delivery
-    └── Compatible Storage
+    └── Compatible Relational and Source Storage
 
 AI
 ├── Platform Model
@@ -1682,14 +1488,10 @@ Neither choice should unnecessarily constrain the other.
                        │      AI     API      API
                        │
                        ▼
-             Knowledge Retrieval
+              Authorized Text Context
                        │
                        ▼
-              Azure SQL Vectors
-                       │
-                       └──────┐
-                              ▼
-                         Tool Decision
+                   Tool Decision
                               │
                               ▼
                    Deterministic Backend
@@ -1737,29 +1539,27 @@ A typical customer request follows approximately:
         ↓
 6. Determine authorization scope
         ↓
-7. Retrieve required relational context
+7. Retrieve required structured records
         ↓
-8. Generate query embedding if knowledge retrieval is needed
+8. Assemble active, authorized text context
         ↓
-9. Search permitted Azure SQL vector knowledge
+9. Resolve organization's AI configuration
         ↓
-10. Resolve organization's AI configuration
+10. Send context through AI SDK
         ↓
-11. Send context through AI SDK
+11. AI determines response/tool request
         ↓
-12. AI determines response/tool request
+12. Backend validates requested operation
         ↓
-13. Backend validates requested operation
+13. Execute deterministic operation
         ↓
-14. Execute deterministic operation
+14. Persist state through Prisma/Azure SQL
         ↓
-15. Persist state through Prisma/Azure SQL
+15. Emit events where necessary
         ↓
-16. Emit events where necessary
+16. Generate response
         ↓
-17. Generate response
-        ↓
-18. Send through original messaging channel
+17. Send through original messaging channel
 ```
 
 At no point should the AI become the authority for:
@@ -1770,9 +1570,7 @@ At no point should the AI become the authority for:
 - Customer boundaries.
 - Database integrity.
 - Appointment state.
-- Vector retrieval scope.
-
----
+- Which private or professional/resource scope it may access.
 
 # Provider-Answer Lifecycle
 
@@ -1789,24 +1587,20 @@ Provider receives request asynchronously
              ↓
 Provider supplies text/files/links later
              ↓
-Store and scope new information
+Validate and store scoped text context
              ↓
-Find relevant unresolved requests
+Identify candidate open questions within authorized scope
              ↓
-Check each against authorization and answer quality
+Check each against the new context and answer quality
              ↓
 Reply to each original requester via their channel
              ↓
 Resolve answered requests; leave others pending
-             ↓
-Embed reusable knowledge asynchronously
 ```
 
 Each pending record keeps enough context to identify the original question, customer, provider, and destination conversation. A single provider response may resolve several related questions, but unrelated questions must remain open.
 
 The agent does not have to wait for provider response before accepting further input from any user. This non-blocking follow-up is a core capability, not an industry-specific behavior.
-
----
 
 # Scheduled Job Lifecycle
 
@@ -1968,17 +1762,17 @@ If the configured model is unavailable:
 
 If a database mutation cannot be confirmed, the assistant must not claim that it succeeded.
 
-## Vector Retrieval Can Return No Answer
+## Supplied Context May Be Insufficient
 
-The closest vector is not automatically a valid answer.
+The presence of text context does not automatically make it a valid answer. If authorized context does not clearly answer the customer's question, or its source or validity is uncertain, the system should treat the answer as unknown and escalate to the provider rather than guess.
 
-If no authorized knowledge record is sufficiently relevant, the system should treat the result as unknown and escalate to the provider.
+
 
 ## Knowledge Conflicts
 
 If two active records at the same scope conflict and metadata cannot determine which one is current, the system should ask the provider.
 
-Semantic similarity must not be used to decide which factual statement is true.
+Language similarity or model confidence must not be used to decide which factual statement is true. Apply source, scope, status, and validity rules; ask the provider when an active same-scope conflict cannot be resolved deterministically.
 
 ## Bounded Context
 
@@ -2027,18 +1821,18 @@ The first meaningful version should focus on the core front-desk workflow.
 
 ## Operational Knowledge
 
-- Text, document, ZIP, URL, and public-repository sources.
-- Source ingestion and retrieval of current external information when needed.
+- Plain-text operational context stored as scoped Azure SQL records.
+- Account-wide, professional/resource-specific, and customer-specific knowledge.
+- AI-assisted scope classification, with backend validation and provider confirmation before information is made broadly available.
+- Direct provision of complete, authorized, reasonably sized context to the AI.
+- Source-linked text extraction from supported documents, ZIP archives, URLs, and public repositories.
+- Bounded retrieval of approved source sections or current external information when needed.
 - Non-blocking provider escalation for missing or unsatisfactory answers.
 - Durable pending-question tracking and asynchronous follow-up to original channels.
-- Matching new provider context to relevant unresolved questions.
-- Account-wide and professional/resource-specific knowledge.
-- Customer-specific knowledge.
-- Embedding generation.
-- Azure SQL vector storage.
-- Semantic retrieval.
+- Matching newly supplied context to candidate unresolved questions within authorized scope.
 - Deterministic account/customer filtering, with professional/resource filtering only when relevant.
-- Optional knowledge expiration.
+- Source references, validity metadata, and optional knowledge expiration.
+- No required embedding generation, vector storage, or semantic search in the MVP.
 
 ## Automation
 
@@ -2077,8 +1871,7 @@ The first meaningful version should focus on the core front-desk workflow.
 
 - Azure SQL for hosted deployments.
 - Prisma for normal relational operations.
-- Azure SQL native vectors for semantic operational knowledge.
-- Dedicated vector repository abstraction.
+- Text-based operational knowledge stored and retrieved through the scoped knowledge service.
 - No direct AI-to-database access.
 - Deterministic account/customer scoping, with professional/resource scope when relevant.
 
@@ -2088,7 +1881,6 @@ The first meaningful version should focus on the core front-desk workflow.
 - Start with a shared application/API container and a background worker/scheduler; separate channel adapters only where platform protocols require them.
 - One queue implementation selected according to verified floci-az support.
 - Azure SQL for operational and durable workflow/job state.
-- Azure SQL vector search.
 - Prisma.
 - AI SDK.
 - Azure deployment support.
@@ -2110,8 +1902,7 @@ The AI must not:
 - Read records belonging to unrelated customers.
 - Execute arbitrary database queries.
 - Connect directly to Azure SQL.
-- Execute unrestricted vector searches.
-- Use semantic similarity as an authorization mechanism.
+- Request or receive context outside the backend-authorized scope.
 - Retrieve another customer's private operational context.
 - Modify provider availability on behalf of a customer.
 - Modify another customer's appointment.
@@ -2136,7 +1927,7 @@ The application backend remains the authority for permissions and state.
 
 The initial hosted system does **not** require:
 
-- A separate vector database per provider.
+- A mandatory vector database or vector-search service.
 - A separate Azure SQL database per tenant.
 - A separate application deployment per tenant.
 - Automatic Azure infrastructure provisioning on every signup.
@@ -2168,8 +1959,8 @@ Self-hosting provides complete deployment isolation when an organization wants t
 3. **Internal data isolation**  
    Account/tenant, provider/resource, and customer boundaries are enforced in relational data before records reach the AI. These implementation boundaries support the two primary product sides and do not require a separate user-facing front desk for each professional.
 
-4. **Vector search is retrieval, not authorization**  
-   Semantic similarity determines relevance only after deterministic scope filtering.
+4. **Context retrieval follows authorization**  
+   The backend applies tenant, professional/resource, and customer scope before any text reaches the AI. Any future search mechanism must preserve this rule.
 
 5. **Model independence**  
    AI SDK separates application logic from the underlying model/provider.
@@ -2180,8 +1971,8 @@ Self-hosting provides complete deployment isolation when an organization wants t
 7. **Database abstraction**  
    Prisma provides the primary relational data-access layer.
 
-8. **Vector abstraction**  
-   Azure SQL vector-specific operations remain isolated behind a knowledge repository rather than leaking database-specific code throughout the application.
+8. **Knowledge service abstraction**  
+   Scoped text storage, source references, and context assembly remain behind a knowledge service rather than being scattered throughout the application.
 
 9. **Container-first runtime and bounded execution**  
    Containerized services maximize local/Azure runtime parity. Requests and worker jobs remain bounded even when adapters or workers need persistent processes.
@@ -2205,7 +1996,7 @@ Self-hosting provides complete deployment isolation when an organization wants t
     The model understands language, organizes information, and proposes actions; deterministic application services control what actually happens.
 
 16. **Knowledge should improve over time**  
-    Missing information can be escalated to the provider, stored with appropriate scope, embedded, and reused when relevant later.
+    Missing information can be escalated to the provider, stored as text with appropriate scope and source metadata, and reused in later authorized context.
 
 ---
 
@@ -2221,15 +2012,15 @@ It is:
 
 Its advantage is the combination of:
 
-**Conversation + operational context + semantic operational memory + scheduling + controlled actions + provider escalation + proactive notifications + scheduled automation + deployment independence + model independence.**
+**Conversation + scoped text-based operational context + scheduling + controlled actions + provider escalation + proactive notifications + scheduled automation + deployment independence + model independence.**
 
 Instead of ending a conversation when information is unavailable, the system can obtain the missing information from the service provider, answer the customer, and retain appropriately scoped operational knowledge for future requests.
 
 Account-wide answers become reusable account-wide knowledge; professional/resource-specific answers remain scoped to the relevant professional or resource. Customer-specific answers remain associated with that customer and cannot become visible to unrelated customers.
 
-The hosted SaaS shares application and database infrastructure by default while enforcing deterministic internal account, provider/resource, and customer boundaries for relational and vector retrieval. These implementation details support the simple customer-facing/provider-facing product model rather than defining additional conversational roles.
+The hosted SaaS shares application and database infrastructure by default while enforcing deterministic internal account, provider/resource, and customer boundaries before authorized text context reaches the AI. These implementation details support the simple customer-facing/provider-facing product model rather than defining additional conversational roles.
 
-Azure SQL provides both relational operational state and vector-backed semantic retrieval for hosted deployments, while Prisma remains the primary application data-access abstraction.
+Azure SQL provides relational operational state and scoped text-based operational knowledge for hosted deployments, while Prisma remains the primary application data-access abstraction.
 
 AI SDK prevents the application's conversational layer from becoming tightly coupled to one model vendor and allows hosted, customer-provided, private, or local model configurations.
 
@@ -2272,7 +2063,7 @@ These are **two applications of the same general-purpose front desk**, not separ
 
 **Example workflow**
 
-1. **Connect sources.** Maintainers give the agent general organization instructions, documentation, uploaded ZIP archives, and links to public GitHub repositories. The system indexes useful source content and can fetch current public issues, pull requests, workflow runs, and available action logs when a question needs fresh information.
+1. **Connect sources.** Maintainers give the agent general organization instructions, documentation, uploaded ZIP archives, and links to public GitHub repositories. The system extracts useful text into source-linked sections and can fetch selected files or current public issues, pull requests, workflow runs, and available action logs when a question needs fresh information.
 2. **Answer contributor questions and guide discovery.** A contributor asks through Discord how to set up a project, why a PR is failing, where to find a policy, what events are coming up, or which published projects match their interests. The agent retrieves relevant authorized documentation or live repository information and responds through Discord. A future website integration could offer the same project-discovery experience.
 3. **Escalate and keep chatting.** If the answer is unavailable or the contributor considers it unsatisfactory, the agent acknowledges the pending follow-up, records the question, and asks an authorized maintainer via the **maintainer-facing interface**. The contributor can continue asking other questions or scheduling meetings without waiting.
 4. **Learn and follow up asynchronously.** The maintainer later supplies an explanation, file, ZIP archive, or link. The agent stores appropriately scoped knowledge, identifies which outstanding questions can now be answered, and replies to each original contributor in Discord. Questions not addressed remain pending.
