@@ -313,12 +313,12 @@ One shared frontend
         +
 One shared containerized application runtime
         +
-One shared Azure SQL database
+One shared relational database
         +
 Many isolated tenants
 ```
 
-The application should **not** create a separate Azure SQL database or complete application instance for every provider or tenant by default.
+The application should **not** create a separate relational database database or complete application instance for every provider or tenant by default.
 
 Isolation is enforced through deterministic relational scope. `tenant_id` identifies the service-provider account and its data-isolation boundary. In knowledge and scheduling records, `provider_id` identifies a specific professional/resource only when relevant; it does not identify the provider-facing account or staff using its interface. `customer_id` identifies the customer when customer-specific scope applies.
 
@@ -330,7 +330,7 @@ A fully isolated application environment belongs to the **self-hosted deployment
 
 # Operational Knowledge and Text-Based Context Storage
 
-The current preferred design stores reusable operational knowledge as **ordinary text records in Azure SQL**, together with relational metadata that defines where each record applies. The text is the source of truth. This is the initial approach for hosted and self-hosted deployments.
+The current preferred design stores reusable operational knowledge as **ordinary text records in relational database**, together with relational metadata that defines where each record applies. The text is the source of truth. This is the initial approach for hosted and self-hosted deployments.
 
 The application does not require a separate vector database, embeddings, or semantic search for the MVP. Knowledge is not split into independent physical databases or files for each customer; account-wide, professional/resource-specific, and customer-specific information uses the same logical record model with different enforced scopes.
 
@@ -432,7 +432,7 @@ For each customer request, the backend should:
 2. Determine whether a particular professional/resource is relevant from the current request, an applicable booking, or an explicit customer choice.
 3. Retrieve active tenant-wide text, applicable professional/resource text, and only that customer's private text.
 4. Retrieve live structured records such as appointments and availability through their dedicated backend operations rather than relying on copied text.
-5. Supply the bounded context to the AI through the AI SDK.
+5. Supply the bounded context to the AI through the AI integration layer.
 
 The backend must apply authorization and scope filters **before** any text reaches the model. A customer request may receive:
 
@@ -522,7 +522,7 @@ Semantic/vector search is **not part of the current preferred implementation or 
 
 It remains an open design question whether a future deployment would benefit enough from semantic or hybrid search to justify the additional indexing, embedding, evaluation, and operational complexity. Reconsider it only if practical testing shows that the text-first approach regularly misses relevant information in large or varied source collections, or that the authorized text cannot be selected and supplied efficiently through metadata, source references, and bounded context assembly.
 
-If that need is demonstrated, evaluate options such as conventional full-text retrieval, hybrid keyword/semantic retrieval, or Azure SQL's native vector capabilities. Any such retrieval would remain optional and must operate only after deterministic tenant, professional/resource, and customer scope filtering. The original scoped text remains the source of truth; an embedding, if ever introduced, is only a derived retrieval aid. A separate vector database is not currently planned or required.
+If that need is demonstrated, evaluate options such as conventional full-text retrieval, hybrid keyword/semantic retrieval, or relational database's native vector capabilities. Any such retrieval would remain optional and must operate only after deterministic tenant, professional/resource, and customer scope filtering. The original scoped text remains the source of truth; an embedding, if ever introduced, is only a derived retrieval aid. A separate vector database is not currently planned or required.
 
 # Spam Management
 
@@ -601,50 +601,27 @@ The model therefore acts as a **natural-language reasoning and tool-selection la
 
 ---
 
-# Database
+# Relational Data Storage
 
-For Azure-hosted deployments, the primary database will be **Azure SQL**.
+The product uses a **relational database** for operational state and scoped text-based knowledge. Domain models, business rules, and application services should remain independent of vendor-specific database features. The preferred implementation engine and hosting options are specified separately in the **Technology Stack** section.
 
-Azure SQL is the relational operational database and the primary store for scoped text-based operational knowledge. The application stores knowledge content as ordinary text records alongside relational scope, validity, and source metadata.
+The relational database stores organizations and service-provider accounts, customers and messaging identities, provider/resource information, provider availability and appointments, appointment status and reminder schedules, follow-up schedules and pending questions, spam records and conversation metadata, scoped operational knowledge text and source references, broadcast definitions, AI configuration references, audit records where required, and durable workflow and scheduled-job state.
 
-Azure SQL stores data such as:
-
-- Organizations and service-provider accounts.
-- Customers and messaging identities.
-- Provider/resource information.
-- Provider availability and appointments.
-- Appointment status and reminder schedules.
-- Follow-up schedules and pending questions.
-- Spam records and conversation metadata.
-- Scoped operational knowledge text and source references.
-- Broadcast definitions, AI configuration references, and audit records where required.
-- Durable workflow and scheduled-job state.
-
-The AI does not connect directly to Azure SQL.
+The AI does not connect directly to the database.
 
 ---
 
-# Prisma
+# ORM and Data Access
 
-**Prisma** will be used as the primary application ORM and database access layer.
+The application uses an ORM as its primary relational data-access layer. The chosen ORM and its database connector are technology-stack decisions rather than product requirements.
 
-Conceptually:
-
-```text
-Application Services
-       ↓
-     Prisma
-       ↓
-   Azure SQL
-```
-
-Prisma will handle ordinary relational operations, including scoped operational knowledge records and their metadata. Application code should preferably use Prisma rather than spreading SQL queries throughout the codebase.
+The ORM handles normal relational operations, including scoped operational knowledge records and their metadata. Application code should use the data-access layer rather than spreading database-specific SQL throughout the codebase.
 
 ---
 
 # Knowledge Service and Repository
 
-A knowledge service/repository should centralize operations for storing, updating, and assembling authorized text context. It should enforce the scope rules and return bounded source-linked text to application services.
+A knowledge service/repository centralizes operations for storing, updating, and assembling authorized text context. It enforces scope rules and returns bounded source-linked text to application services.
 
 Conceptually:
 
@@ -653,9 +630,9 @@ Conversation / Provider Services
               ↓
         Knowledge Service
               ↓
-            Prisma
+        Relational ORM
               ↓
-           Azure SQL
+       Relational Database
 ```
 
 The application should use operations such as:
@@ -668,7 +645,7 @@ updateKnowledge(...)
 deactivateKnowledge(...)
 ```
 
-This keeps scope validation and context assembly in one place without requiring vector-specific SQL, embedding services, or a dedicated vector repository. A future retrieval strategy can be added behind the knowledge service if measured requirements justify it.
+This keeps scope validation and context assembly in one place. It does not require a specific database engine, vector-specific SQL, embedding services, or a dedicated vector repository. A future retrieval strategy can be added behind the knowledge service if measured requirements justify it.
 
 # Database Access Boundary
 
@@ -687,24 +664,13 @@ Authorization Layer
 Application Service
  │
  ▼
-Prisma / Knowledge Repository
+Knowledge Service / ORM
  │
  ▼
-Azure SQL
+Relational Database
 ```
 
-The application determines:
-
-- Organization.
-- Provider.
-- Customer.
-- Role.
-- Permitted action.
-- Permitted data scope.
-
-before any database query is executed.
-
----
+The application determines the organization, provider/resource, customer, role, permitted action, and permitted data scope before any database query is executed.
 
 # Identity
 
@@ -768,7 +734,7 @@ Other ─────┘
    Authorization         AI Layer
                            │
                            ▼
-                         AI SDK
+                         AI integration layer
           │
           └────────┬─────────┘
                    ▼
@@ -778,10 +744,10 @@ Other ─────┘
           Application Services
                    │
                    ▼
-                 Prisma
+                 ORM
                    │
                    ▼
-               Azure SQL
+               relational database
 ```
 
 The currently planned channel adapters are **WhatsApp, Telegram, and Discord**. Additional channels can later implement the same gateway interface.
@@ -795,7 +761,7 @@ The internal application works with a normalized message format instead of depen
 
 The application should not depend directly on one model vendor.
 
-**AI SDK** will provide the application-level AI abstraction.
+**AI integration layer** will provide the application-level AI abstraction.
 
 Conceptually:
 
@@ -803,7 +769,7 @@ Conceptually:
 Conversation Engine
         │
         ▼
-      AI SDK
+      AI integration layer
         │
         ├── Platform-provided model
         │
@@ -816,7 +782,7 @@ Conversation Engine
         └── Local/private endpoint
 ```
 
-The application uses the AI SDK for capabilities such as:
+The application uses the AI integration layer for capabilities such as:
 
 - Model invocation.
 - Structured outputs where useful.
@@ -872,7 +838,7 @@ This can point to:
 - A model running on another machine.
 - A private cloud endpoint.
 - A supported commercial provider.
-- A custom AI SDK provider integration.
+- A custom AI integration layer provider integration.
 
 This makes AI-provider choice independent of infrastructure choice.
 
@@ -929,7 +895,7 @@ AI Configuration
      └── Provider Options
               │
               ▼
-            AI SDK
+            AI integration layer
 ```
 
 ---
@@ -960,7 +926,7 @@ The backend decides whether that operation is valid and authorized.
 
 # Container-First Runtime and Event-Driven Architecture
 
-The initial hosted SaaS should use a **container-first, event-driven architecture** to keep runtime behavior as consistent as practical across local development, floci-az, and Azure. Azure Container Apps is the preferred hosted runtime for containerized components, with Docker providing a common packaging model.
+The initial hosted SaaS should use a **container-first, event-driven architecture** to keep runtime behavior as consistent as practical across local development, floci-az, and Azure. managed container runtime is the preferred hosted runtime for containerized components, with Docker providing a common packaging model.
 
 Start with the fewest containers that meet the product's needs: a shared application/API and a background worker/scheduler. Split channel adapters or other components into separate containers only when a platform protocol, isolation requirement, or measured scaling need justifies it. Share application contracts and infrastructure abstractions across those components.
 
@@ -985,13 +951,13 @@ Authorize Request
       ↓
 Assemble Authorized Text Context
       ↓
-AI SDK
+AI integration layer
       ↓
 AI Decision / Tool Call
       ↓
 Deterministic Application Service
       ↓
-Prisma / Azure SQL
+ORM / relational database
       ↓
 Persisted Event / Queue
       ↓
@@ -1002,7 +968,7 @@ Outbound Notification
 
 Each incoming request and worker job should remain bounded.
 
-Long-running workflows must use durable, resumable state and be decomposed into independent events, queued jobs, and bounded executions. Pending work must survive request completion, retries, and process restarts. The initial design should use Azure SQL for durable job/workflow state and one queue implementation validated in floci-az for queued delivery; do not implement both Azure Queue Storage and Service Bus by default. A queue is a delivery mechanism, not a complete workflow orchestrator; workflow state, idempotency, retries, scheduling, and recovery must be designed explicitly.
+Long-running workflows must use durable, resumable state and be decomposed into independent events, queued jobs, and bounded executions. Pending work must survive request completion, retries, and process restarts. The initial design should use relational database for durable job/workflow state and one queue implementation validated in floci-az for queued delivery; select one queue implementation by default and do not add a second queue provider without a concrete need. A queue is a delivery mechanism, not a complete workflow orchestrator; workflow state, idempotency, retries, scheduling, and recovery must be designed explicitly.
 
 Persistent adapters and workers are permitted where needed. The architecture does not require the entire application to run as one continuously active process.
 
@@ -1038,7 +1004,7 @@ This supports horizontal scaling, retries, and recovery without tying an entire 
 
 Scheduled and time-dependent workflows should use persisted due-work records, a scheduler/dispatcher, and queue-driven workers. The initial implementation should favor a containerized scheduler/worker that can run the same code locally and in Azure, using only scheduling and messaging features validated through floci-az.
 
-Azure SQL stores due times and job state. The scheduler/dispatcher periodically discovers due work and enqueues bounded jobs. It must tolerate restarts and repeated scans, and use safe claiming or idempotency controls to prevent duplicate effects.
+relational database stores due times and job state. The scheduler/dispatcher periodically discovers due work and enqueues bounded jobs. It must tolerate restarts and repeated scans, and use safe claiming or idempotency controls to prevent duplicate effects.
 
 Examples include:
 
@@ -1057,7 +1023,7 @@ A simplified flow is:
 ```text
 Containerized Scheduler / Dispatcher
       ↓
-Query Azure SQL for due jobs
+Query relational database for due jobs
       ↓
 Enqueue due events/jobs
       ↓
@@ -1072,7 +1038,7 @@ The scheduler/dispatcher should discover and dispatch work rather than perform e
 
 # Appointment Reminder Example
 
-An appointment can contain reminder state stored in Azure SQL.
+An appointment can contain reminder state stored in relational database.
 
 ```text
 Appointment
@@ -1102,7 +1068,7 @@ Containerized Messaging Worker
       ↓
 Configured Messaging Channel
       ↓
-Update Azure SQL
+Update relational database
 ```
 
 ---
@@ -1199,28 +1165,57 @@ Mark answered questions resolved
 
 
 
-# Infrastructure Direction
+# Technology Stack
 
-Primary stack:
+The product requirements and core architecture remain independent of specific vendors. The following are current implementation preferences and deployment options, not customer-facing product requirements.
 
-- Next.js.
-- DaisyUI.
-- AI SDK.
-- Prisma.
-- Additional runtimes only when a concrete requirement justifies them.
-- Docker and containerized application services.
-- Azure Container Apps for hosted container runtime.
-- Azure Queue Storage or Service Bus for event/job delivery, selected according to verified floci-az support.
-- Azure SQL for relational operational data and scoped text-based knowledge.
-- Terraform where applicable.
-- floci-az for local development, validation, and self-hosted operation.
-- Event-driven processing with durable workflow/job state.
+## Application and AI
 
-Infrastructure should be reproducible using Terraform wherever applicable.
+- **Application framework:** Next.js.
+- **UI styling:** DaisyUI.
+- **AI integration:** AI SDK, behind an application-level model/provider abstraction.
+- **Relational data access:** Prisma ORM.
+- **Additional runtimes:** Only when a concrete requirement justifies them.
 
-The same container images should run locally and in Azure wherever practical. The application must remain sufficiently decoupled from Azure-specific services that the same core product can operate in Azure or through a local/self-hosted environment.
+## Relational Database
+
+**PostgreSQL is the first-choice and first-class database target.** It is the preferred starting point for development, testing, hosted deployment, and self-hosted operation.
+
+PostgreSQL is preferred because the same established relational engine can be self-hosted, packaged for supported CPU architectures including ARM, and obtained from multiple managed database providers. The PostgreSQL project documents ARM among the architectures on which PostgreSQL can be expected to work. Platform-specific builds, container images, extensions, and drivers must still be validated.
+
+Possible PostgreSQL deployment options include:
+
+1. **Azure:** Azure Database for PostgreSQL Flexible Server for managed Azure hosting.
+2. **Other managed providers:** Amazon RDS for PostgreSQL, Google Cloud SQL for PostgreSQL, and other managed PostgreSQL services.
+3. **Self-hosted:** Community PostgreSQL running in the organization's own infrastructure or containers, including supported ARM-based environments.
+
+These providers offer PostgreSQL-compatible database services, but they do not guarantee identical extensions, versions, connection behavior, compute architectures, or operational features. Validate the features required by the application against the selected provider and region instead of assuming every service is interchangeable.
+
+Other relational database engines may be evaluated as future alternatives if a concrete deployment requirement justifies them. The MVP does not promise equal support for multiple database engines; PostgreSQL is the initial supported target.
+
+## Knowledge Storage
+
+- Store operational knowledge as ordinary scoped text records in the relational database.
+- Keep source references, validity metadata, and account/provider/customer scope with each record.
+- No separate vector database or embedding service is required for the preferred implementation.
+- Semantic or vector retrieval remains an open future evaluation, not an MVP dependency.
+
+## Runtime and Infrastructure
+
+- **Local and self-hosted packaging:** Docker and containerized application services.
+- **Preferred Azure container runtime:** Azure Container Apps.
+- **Queue/event delivery:** Azure Queue Storage or Azure Service Bus; select one after validating the required features through floci-az.
+- **Infrastructure as code:** Terraform where applicable.
+- **Local Azure-oriented validation:** floci-az.
+- **Execution model:** Event-driven processing with durable workflow/job state and bounded worker jobs.
 
 ---
+
+# Infrastructure Direction
+
+The runtime should remain container-first and event-driven. Keep application services, durable workflow state, queue delivery, and scheduling behind application-level contracts so the same workflows can run in local development, hosted infrastructure, and self-hosted deployments. Use the fewest separate services that satisfy protocol, isolation, reliability, and measured scaling requirements.
+
+Infrastructure should be reproducible using infrastructure-as-code tools wherever applicable. The same container images should run locally and in hosted environments wherever practical. Keep application logic sufficiently decoupled from specific cloud services to support local and self-hosted operation.
 
 # floci-az
 
@@ -1263,31 +1258,18 @@ The application should be capable of operating against either environment with m
 
 # Azure Deployment
 
-The Azure-hosted architecture will use:
+Azure is a supported hosted deployment target. The Azure deployment should use:
 
-- Azure Container Apps for containerized frontend, API, channel-adapter, and background-worker components as appropriate.
-- Azure SQL for relational data and durable workflow/job state.
-- Azure SQL for relational operational data, scoped text-based knowledge, and durable workflow/job state.
-- Azure Queue Storage or Azure Service Bus for queued event/job delivery, based on the features validated through floci-az.
-- Prisma for relational application access.
+- A managed container runtime for the frontend, API, channel-adapter, and background-worker components as appropriate.
+- A managed relational database service for operational data, scoped text-based knowledge, and durable workflow/job state.
+- One queue implementation for event/job delivery, selected according to the behavior validated through floci-az.
+- The selected ORM/data-access layer and knowledge service.
 - Event-driven processing and bounded worker jobs.
-- AI SDK for model/provider abstraction.
-- WhatsApp, Telegram, and Discord integrations.
+- The configured AI integration and messaging providers.
 
-The project will prioritize cost-conscious Azure services where practical while validating the exact service behavior required by the application.
+The specific database engine and managed database offering are technology-stack choices, not requirements of the product's domain model. The project will prioritize cost-conscious services while validating the exact service behavior required by the application.
 
-The architecture should remain:
-
-- Container-first.
-- Event-driven.
-- Cost-conscious.
-- Horizontally scalable.
-- Able to keep persistent replicas only for components that need them, such as a Discord Gateway adapter or a background worker.
-
-Azure is a supported deployment target rather than a mandatory runtime dependency for the product.
-
----
-
+The architecture should remain container-first, event-driven, cost-conscious, horizontally scalable, and able to keep persistent replicas only for components that need them, such as a Discord Gateway adapter or a background worker. Azure is a supported deployment target rather than a mandatory runtime dependency.
 
 # Azure-Independent Operation
 
@@ -1304,7 +1286,7 @@ A service provider or organization may operate the system using:
 - A local/private AI endpoint.
 - Their own messaging and networking configuration.
 
-For the MVP, Azure-independent operation means validating the same containerized application and required supporting services through floci-az. Supporting arbitrary alternative databases or queues is not required unless a concrete need justifies it.
+For the MVP, Azure-independent operation means validating the same containerized application and required supporting services through floci-az, using the preferred relational database implementation. Supporting arbitrary alternative database engines or queues is not required unless a concrete need justifies it.
 
 The abstraction should allow equivalent local implementations of:
 
@@ -1326,7 +1308,7 @@ Azure Static Web Apps (SWA) and Azure Durable Functions are **future exploration
 - SWA may be evaluated as an optional frontend-hosting approach if it reduces operational complexity without undermining local/Azure parity.
 - Durable Functions may be evaluated as an orchestration option for durable multi-step workflows if the required trigger, orchestration, retry, and replay behavior can be validated through floci-az.
 
-Until then, use containerized application components, Azure SQL-backed workflow/job state, and queue-driven workers. Keep workflow logic behind application-level abstractions so a future scheduling or orchestration implementation can be introduced without rewriting business logic.
+Until then, use containerized application components, relational database-backed workflow/job state, and queue-driven workers. Keep workflow logic behind application-level abstractions so a future scheduling or orchestration implementation can be introduced without rewriting business logic.
 
 ---
 
@@ -1341,27 +1323,27 @@ The project operates the infrastructure and organizations subscribe to the servi
 The default hosted architecture is shared and multi-tenant. The initial product interaction is messaging-first; if a web frontend is included, it belongs to the provider-facing setup/administration side and does not introduce a third product-facing role. Public customer website chat remains future scope, not an MVP requirement.
 
 ```text
-Shared Next.js frontend
+Shared web frontend
         +
 Shared containerized API and worker services
         +
-Shared Azure SQL database
+Shared relational database database
         +
 Tenant/provider/customer scoped data
 ```
 
-Ordinary account creation does not provision a new application stack or Azure SQL database.
+Ordinary account creation does not provision a new application stack or relational database database.
 
 The hosted version may provide:
 
 - Azure-hosted infrastructure.
-- Azure Container Apps for containerized application services.
-- Azure SQL for relational data and scoped text-based operational knowledge.
+- managed container runtime for containerized application services.
+- relational database for relational data and scoped text-based operational knowledge.
 - Queue-backed event delivery and containerized background workers.
 - Durable scheduled-job state and dispatch.
 - Messaging integrations.
 - Platform-managed AI access.
-- AI SDK integrations.
+- AI integration layer integrations.
 - Updates.
 - Operational monitoring.
 
@@ -1397,24 +1379,24 @@ Examples:
 
 ```text
 Azure Deployment
-+ Azure Container Apps
-+ Azure SQL
++ managed container runtime
++ relational database
 + Queue / Worker Services
 + Platform AI
 ```
 
 ```text
 Azure Deployment
-+ Azure Container Apps
-+ Azure SQL
++ managed container runtime
++ relational database
 + Queue / Worker Services
 + Provider's AI API
 ```
 
 ```text
 Azure Deployment
-+ Azure Container Apps
-+ Azure SQL
++ managed container runtime
++ relational database
 + Private AI Endpoint
 ```
 
@@ -1435,9 +1417,9 @@ Conceptually:
 ```text
 Infrastructure
 ├── Azure
-│   ├── Azure Container Apps
+│   ├── managed container runtime
 │   ├── Queue Storage / Service Bus
-│   └── Azure SQL
+│   └── relational database
 │
 └── Local / Self-Hosted / floci-az
     ├── Docker Containers
@@ -1479,7 +1461,7 @@ Neither choice should unnecessarily constrain the other.
                        ┌──────┴──────┐
                        │             │
                        ▼             ▼
-                 Context Layer     AI SDK
+                 Context Layer     AI integration layer
                        │             │
                        │      ┌──────┼────────┐
                        │      │      │        │
@@ -1503,10 +1485,10 @@ Neither choice should unnecessarily constrain the other.
                   │           │           │
                   └───────────┼───────────┘
                               ▼
-                           Prisma
+                           ORM
                               │
                               ▼
-                          Azure SQL
+                          relational database
                               │
                 ┌─────────────┴─────────────┐
                 │                           │
@@ -1517,7 +1499,7 @@ Neither choice should unnecessarily constrain the other.
        Queue / Event Bus          Scheduler / Dispatcher
                 │                           │
                 ▼                           ▼
-       Containerized Workers      Azure SQL Job State
+       Containerized Workers      relational database Job State
 ```
 
 ---
@@ -1545,7 +1527,7 @@ A typical customer request follows approximately:
         ↓
 9. Resolve organization's AI configuration
         ↓
-10. Send context through AI SDK
+10. Send context through AI integration layer
         ↓
 11. AI determines response/tool request
         ↓
@@ -1553,7 +1535,7 @@ A typical customer request follows approximately:
         ↓
 13. Execute deterministic operation
         ↓
-14. Persist state through Prisma/Azure SQL
+14. Persist state through ORM/relational database
         ↓
 15. Emit events where necessary
         ↓
@@ -1607,7 +1589,7 @@ The agent does not have to wait for provider response before accepting further i
 ```text
 1. Containerized scheduler/dispatcher runs
         ↓
-2. Query Azure SQL for due jobs
+2. Query relational database for due jobs
         ↓
 3. Claim/mark work for processing
         ↓
@@ -1619,7 +1601,7 @@ The agent does not have to wait for provider response before accepting further i
         ↓
 7. Send notification if required
         ↓
-8. Persist status through Prisma/Azure SQL
+8. Persist status through ORM/relational database
 ```
 
 Scheduled operations should be idempotent where possible so retries do not create duplicate notifications or duplicate state changes.
@@ -1821,7 +1803,7 @@ The first meaningful version should focus on the core front-desk workflow.
 
 ## Operational Knowledge
 
-- Plain-text operational context stored as scoped Azure SQL records.
+- Plain-text operational context stored as scoped relational database records.
 - Account-wide, professional/resource-specific, and customer-specific knowledge.
 - AI-assisted scope classification, with backend validation and provider confirmation before information is made broadly available.
 - Direct provision of complete, authorized, reasonably sized context to the AI.
@@ -1854,7 +1836,7 @@ The first meaningful version should focus on the core front-desk workflow.
 
 ## AI
 
-- AI SDK.
+- AI integration layer.
 - Platform-managed model option.
 - Bring-your-own-provider option.
 - Custom/private endpoint option.
@@ -1869,20 +1851,20 @@ The first meaningful version should focus on the core front-desk workflow.
 
 ## Database
 
-- Azure SQL for hosted deployments.
-- Prisma for normal relational operations.
+- relational database for hosted deployments.
+- ORM for normal relational operations.
 - Text-based operational knowledge stored and retrieved through the scoped knowledge service.
 - No direct AI-to-database access.
 - Deterministic account/customer scoping, with professional/resource scope when relevant.
 
 ## Infrastructure
 
-- Azure Container Apps for hosted containerized services.
+- managed container runtime for hosted containerized services.
 - Start with a shared application/API container and a background worker/scheduler; separate channel adapters only where platform protocols require them.
 - One queue implementation selected according to verified floci-az support.
-- Azure SQL for operational and durable workflow/job state.
-- Prisma.
-- AI SDK.
+- relational database for operational and durable workflow/job state.
+- ORM.
+- AI integration layer.
 - Azure deployment support.
 - floci-az validation and local/self-hosted operation.
 - Docker.
@@ -1901,7 +1883,7 @@ The AI must not:
 - Provide medical advice as part of the front-desk system.
 - Read records belonging to unrelated customers.
 - Execute arbitrary database queries.
-- Connect directly to Azure SQL.
+- Connect directly to relational database.
 - Request or receive context outside the backend-authorized scope.
 - Retrieve another customer's private operational context.
 - Modify provider availability on behalf of a customer.
@@ -1928,7 +1910,7 @@ The application backend remains the authority for permissions and state.
 The initial hosted system does **not** require:
 
 - A mandatory vector database or vector-search service.
-- A separate Azure SQL database per tenant.
+- A separate relational database database per tenant.
 - A separate application deployment per tenant.
 - Automatic Azure infrastructure provisioning on every signup.
 - Cross-tenant customer identity merging.
@@ -1963,13 +1945,13 @@ Self-hosting provides complete deployment isolation when an organization wants t
    The backend applies tenant, professional/resource, and customer scope before any text reaches the AI. Any future search mechanism must preserve this rule.
 
 5. **Model independence**  
-   AI SDK separates application logic from the underlying model/provider.
+   AI integration layer separates application logic from the underlying model/provider.
 
 6. **Infrastructure independence**  
    Azure is a supported hosted target while floci-az and compatible local services enable local and self-hosted operation.
 
 7. **Database abstraction**  
-   Prisma provides the primary relational data-access layer.
+   ORM provides the primary relational data-access layer.
 
 8. **Knowledge service abstraction**  
    Scoped text storage, source references, and context assembly remain behind a knowledge service rather than being scattered throughout the application.
@@ -2020,11 +2002,11 @@ Account-wide answers become reusable account-wide knowledge; professional/resour
 
 The hosted SaaS shares application and database infrastructure by default while enforcing deterministic internal account, provider/resource, and customer boundaries before authorized text context reaches the AI. These implementation details support the simple customer-facing/provider-facing product model rather than defining additional conversational roles.
 
-Azure SQL provides relational operational state and scoped text-based operational knowledge for hosted deployments, while Prisma remains the primary application data-access abstraction.
+relational database provides relational operational state and scoped text-based operational knowledge for hosted deployments, while ORM remains the primary application data-access abstraction.
 
-AI SDK prevents the application's conversational layer from becoming tightly coupled to one model vendor and allows hosted, customer-provided, private, or local model configurations.
+AI integration layer prevents the application's conversational layer from becoming tightly coupled to one model vendor and allows hosted, customer-provided, private, or local model configurations.
 
-A containerized scheduler/dispatcher and queue-driven workers handle scheduled work and retries, with durable job state stored in Azure SQL.
+A containerized scheduler/dispatcher and queue-driven workers handle scheduled work and retries, with durable job state stored in relational database.
 
 floci-az allows the architecture to be validated, operated, and self-hosted independently of Azure.
 
